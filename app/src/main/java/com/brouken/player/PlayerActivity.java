@@ -1347,6 +1347,18 @@ public class PlayerActivity extends Activity {
                 .setTrackSelector(trackSelector)
                 .setMediaSourceFactory(mediaSourceFactory);
 
+        if (haveMedia && mPrefs.mediaUri != null && mPrefs.mediaUri.getScheme() != null) {
+            String scheme = mPrefs.mediaUri.getScheme().toLowerCase();
+            if ("ftp".equals(scheme)) {
+                playerBuilder.setMediaSourceFactory(
+                        new DefaultMediaSourceFactory(new FtpDataSource.Factory(), extractorsFactory)
+                                .setSubtitleParserFactory(subtitleParserFactory));
+            } else if ("smb".equals(scheme)) {
+                playerBuilder.setMediaSourceFactory(
+                        new DefaultMediaSourceFactory(new SmbDataSource.Factory(), extractorsFactory)
+                                .setSubtitleParserFactory(subtitleParserFactory));
+            }
+        }
         if (haveMedia && isNetworkUri) {
             if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
                 HashMap<String, String> headers = new HashMap<>();
