@@ -93,6 +93,10 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
 import androidx.media3.extractor.ts.TsExtractor;
+import androidx.media3.common.util.Consumer;
+import androidx.media3.extractor.text.CuesWithTiming;
+import androidx.media3.extractor.text.DefaultSubtitleParserFactory;
+import androidx.media3.extractor.text.SubtitleParser;
 import androidx.media3.session.MediaSession;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.CaptionStyleCompat;
@@ -171,6 +175,7 @@ public class PlayerActivity extends Activity {
     private boolean passthroughEnabled = true;
     private TextView buttonSync;
     private long audioDelayMs = 0;
+    private long subtitleDelayMs = 0;
     private ImageButton exoSettings;
     private ImageButton exoPlayPause;
     private ProgressBar loadingProgressBar;
@@ -1266,10 +1271,36 @@ public class PlayerActivity extends Activity {
             );
         }
         // https://github.com/google/ExoPlayer/issues/8571
+        SubtitleParser.Factory subtitleParserFactory = new DefaultSubtitleParserFactory() {
+            @Override
+            public SubtitleParser create(Format format) {
+                SubtitleParser delegate = super.create(format);
+                return new SubtitleParser() {
+                    @Override
+                    public void parse(byte[] data, int offset, int length, OutputOptions outputOptions, Consumer<CuesWithTiming> output) {
+                        delegate.parse(data, offset, length, outputOptions, cues -> {
+                            long shiftedStart = cues.startTimeUs == C.TIME_UNSET
+                                    ? C.TIME_UNSET
+                                    : Math.max(0L, cues.startTimeUs + (subtitleDelayMs * 1000L));
+                            output.accept(new CuesWithTiming(cues.cues, shiftedStart, cues.durationUs));
+                        });
+                    }
+
+                    @Override
+                    public int getCueReplacementBehavior() {
+                        return delegate.getCueReplacementBehavior();
+                    }
+                };
+            }
+        };
+
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
+                .setSubtitleParserFactory(subtitleParserFactory)
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
                 .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
+
         MediaCodecUtil.setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
+
         @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this) {
             @Override
             protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput, boolean enableAudioTrackPlaybackParams) {
@@ -1298,9 +1329,12 @@ public class PlayerActivity extends Activity {
                 ? DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
                 : mPrefs.decoderPriority);
 
+        DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(this, extractorsFactory)
+                .setSubtitleParserFactory(subtitleParserFactory);
+
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(this, extractorsFactory));
+                .setMediaSourceFactory(mediaSourceFactory);
 
         if (haveMedia && isNetworkUri) {
             if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
@@ -2392,51 +2426,99 @@ public class PlayerActivity extends Activity {
     }
 
     private void showAudioDelayDialog() {
+        final long initialSubDelay = subtitleDelayMs;
+
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(40, 30, 40, 20);
 
-        TextView status = new TextView(this);
-        status.setTextSize(18);
-        status.setGravity(Gravity.CENTER);
-        status.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
-        layout.addView(status);
+        // --- Audio Delay ---
+        TextView audioStatus = new TextView(this);
+        audioStatus.setTextSize(17);
+        audioStatus.setGravity(Gravity.CENTER);
+        audioStatus.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
+        layout.addView(audioStatus);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER);
-        row.setPadding(0, 24, 0, 0);
+        LinearLayout audioRow = new LinearLayout(this);
+        audioRow.setOrientation(LinearLayout.HORIZONTAL);
+        audioRow.setGravity(Gravity.CENTER);
+        audioRow.setPadding(0, 12, 0, 24);
 
-        Button btnMinus = new Button(this);
-        btnMinus.setText("-50 ms");
-        btnMinus.setOnClickListener(v -> {
+        Button aMinus = new Button(this);
+        aMinus.setText("-50 ms");
+        aMinus.setOnClickListener(v -> {
             audioDelayMs -= 50;
-            status.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
+            audioStatus.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
         });
 
-        Button btnReset = new Button(this);
-        btnReset.setText("Reset");
-        btnReset.setOnClickListener(v -> {
+        Button aReset = new Button(this);
+        aReset.setText("Reset");
+        aReset.setOnClickListener(v -> {
             audioDelayMs = 0;
-            status.setText("Audio Delay: 0 ms");
+            audioStatus.setText("Audio Delay: 0 ms");
         });
 
-        Button btnPlus = new Button(this);
-        btnPlus.setText("+50 ms");
-        btnPlus.setOnClickListener(v -> {
+        Button aPlus = new Button(this);
+        aPlus.setText("+50 ms");
+        aPlus.setOnClickListener(v -> {
             audioDelayMs += 50;
-            status.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
+            audioStatus.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
         });
 
-        row.addView(btnMinus);
-        row.addView(btnReset);
-        row.addView(btnPlus);
-        layout.addView(row);
+        audioRow.addView(aMinus);
+        audioRow.addView(aReset);
+        audioRow.addView(aPlus);
+        layout.addView(audioRow);
+
+        // --- Subtitle Delay ---
+        TextView subStatus = new TextView(this);
+        subStatus.setTextSize(17);
+        subStatus.setGravity(Gravity.CENTER);
+        subStatus.setText("Subtitle Delay: " + (subtitleDelayMs > 0 ? "+" : "") + subtitleDelayMs + " ms");
+        layout.addView(subStatus);
+
+        LinearLayout subRow = new LinearLayout(this);
+        subRow.setOrientation(LinearLayout.HORIZONTAL);
+        subRow.setGravity(Gravity.CENTER);
+        subRow.setPadding(0, 12, 0, 0);
+
+        Button sMinus = new Button(this);
+        sMinus.setText("-100 ms");
+        sMinus.setOnClickListener(v -> {
+            subtitleDelayMs -= 100;
+            subStatus.setText("Subtitle Delay: " + (subtitleDelayMs > 0 ? "+" : "") + subtitleDelayMs + " ms");
+        });
+
+        Button sReset = new Button(this);
+        sReset.setText("Reset");
+        sReset.setOnClickListener(v -> {
+            subtitleDelayMs = 0;
+            subStatus.setText("Subtitle Delay: 0 ms");
+        });
+
+        Button sPlus = new Button(this);
+        sPlus.setText("+100 ms");
+        sPlus.setOnClickListener(v -> {
+            subtitleDelayMs += 100;
+            subStatus.setText("Subtitle Delay: " + (subtitleDelayMs > 0 ? "+" : "") + subtitleDelayMs + " ms");
+        });
+
+        subRow.addView(sMinus);
+        subRow.addView(sReset);
+        subRow.addView(sPlus);
+        layout.addView(subRow);
 
         new AlertDialog.Builder(this)
-                .setTitle("Audio Sync")
+                .setTitle("Audio & Subtitle Sync")
                 .setView(layout)
-                .setPositiveButton("Done", null)
+                .setPositiveButton("Done", (d, w) -> {
+                    if (subtitleDelayMs != initialSubDelay && haveMedia && player != null) {
+                        boolean wasPlaying = player.isPlaying();
+                        savePlayer();
+                        restorePlayState = wasPlaying;
+                        initializePlayer();
+                    }
+                })
                 .show();
     }
 }
