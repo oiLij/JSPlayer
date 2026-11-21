@@ -84,6 +84,10 @@ import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
+import android.view.Gravity;
+import androidx.media3.exoplayer.audio.AudioCapabilities;
+import androidx.media3.exoplayer.audio.AudioSink;
+import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
 import androidx.media3.extractor.ts.TsExtractor;
@@ -161,6 +165,8 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonPiP;
     private ImageButton buttonAspectRatio;
     private ImageButton buttonRotation;
+    private TextView buttonPassthrough;
+    private boolean passthroughEnabled = true;
     private ImageButton exoSettings;
     private ImageButton exoPlayPause;
     private ProgressBar loadingProgressBar;
@@ -614,11 +620,34 @@ public class PlayerActivity extends Activity {
 
         updateButtons(false);
 
+        buttonPassthrough = new TextView(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonPassthrough.setId(View.generateViewId());
+        buttonPassthrough.setGravity(Gravity.CENTER);
+        buttonPassthrough.setTextColor(Color.WHITE);
+        buttonPassthrough.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        buttonPassthrough.setTypeface(Typeface.DEFAULT_BOLD);
+        buttonPassthrough.setFocusable(true);
+        buttonPassthrough.setClickable(true);
+        buttonPassthrough.setText("PT");
+        buttonPassthrough.setOnClickListener(view -> {
+            passthroughEnabled = !passthroughEnabled;
+            buttonPassthrough.setText(passthroughEnabled ? "PT" : "PCM");
+            Utils.showText(playerView, passthroughEnabled ? "Audio: Passthrough" : "Audio: PCM", 1500);
+            if (haveMedia && player != null) {
+                boolean wasPlaying = player.isPlaying();
+                savePlayer();
+                restorePlayState = wasPlaying;
+                initializePlayer();
+            }
+            resetHideCallbacks();
+        });
+        
         final HorizontalScrollView horizontalScrollView = (HorizontalScrollView) getLayoutInflater().inflate(R.layout.controls, null);
         final LinearLayout controls = horizontalScrollView.findViewById(R.id.controls);
 
         controls.addView(buttonOpen);
         controls.addView(exoSubtitle);
+        controls.addView(buttonPassthrough);
         controls.addView(buttonAspectRatio);
         if (Utils.isPiPSupported(this) && buttonPiP != null) {
             controls.addView(buttonPiP);
@@ -1225,8 +1254,21 @@ public class PlayerActivity extends Activity {
                 .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS)
                 .setTsExtractorTimestampSearchBytes(1500 * TsExtractor.TS_PACKET_SIZE);
         MediaCodecUtil.setMapDV7ToHevc(mPrefs.mapDV7ToHevc);
-        @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this)
-                .setExtensionRendererMode(mPrefs.decoderPriority);
+        @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this) {
+            @Override
+            protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput, boolean enableAudioTrackPlaybackParams) {
+                if (passthroughEnabled) {
+                    return super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams);
+                }
+                return new DefaultAudioSink.Builder(context)
+                        .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+                        .setEnableFloatOutput(enableFloatOutput)
+                        .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                        .build();
+            }
+        }.setExtensionRendererMode(passthroughEnabled
+                ? DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                : mPrefs.decoderPriority);
 
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
