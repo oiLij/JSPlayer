@@ -1,19 +1,29 @@
 package com.brouken.player;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Stack;
 
 public class TvHomeActivity extends Activity {
@@ -21,9 +31,14 @@ public class TvHomeActivity extends Activity {
     private TextView tvHeader;
     private RecyclerView tvList;
     private BrowserAdapter adapter;
+    private NetworkBrowser networkBrowser;
 
-    private String currentControlUrl = null;
-    private final Stack<String> folderStack = new Stack<>();
+    private final List<NetworkBrowser.NetItem> discoveredItems = new ArrayList<>();
+    private final Set<String> discoveredKeys = new HashSet<>();
+
+    // Active browse state
+    private NetworkBrowser.NetItem activeServer = null;
+    private final Stack<String> pathStack = new Stack<>();
     private final Stack<String> titleStack = new Stack<>();
 
     @Override
@@ -36,66 +51,204 @@ public class TvHomeActivity extends Activity {
         tvList.setLayoutManager(new LinearLayoutManager(this));
         adapter = new BrowserAdapter();
         tvList.setAdapter(adapter);
+        networkBrowser = new NetworkBrowser();
 
-        TextView navDlna = findViewById(R.id.nav_dlna);
+        TextView navNetwork = findViewById(R.id.nav_dlna);
         TextView navLocal = findViewById(R.id.nav_local);
         TextView navSettings = findViewById(R.id.nav_settings);
 
-        navDlna.setOnClickListener(v -> loadDlnaServers());
+        navNetwork.setOnClickListener(v -> loadNetworkHub());
         navLocal.setOnClickListener(v -> startActivity(new Intent(this, PlayerActivity.class)));
         navSettings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
 
-        navDlna.requestFocus();
-        loadDlnaServers();
+        navNetwork.requestFocus();
+        loadNetworkHub();
     }
 
-    private void loadDlnaServers() {
-        currentControlUrl = null;
-        folderStack.clear();
-        titleStack.clear();
-        tvHeader.setText("Scanning DLNA servers...");
-        adapter.setItems(new ArrayList<>());
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (networkBrowser != null) {
+            networkBrowser.stopMdnsDiscovery();
+        }
+    }
 
+    private void loadNetworkHub() {
+        activeServer = null;
+        pathStack.clear();
+        titleStack.clear();
+        discoveredItems.clear();
+        discoveredKeys.clear();
+        tvHeader.setText("Network (Scanning LAN...)");
+        refreshHubList();
+
+        // 1. DLNA SSDP scan
         DlnaBrowser.discoverServers(items -> {
-            if (items.isEmpty()) {
-                tvHeader.setText("No DLNA servers found (click DLNA to retry)");
-            } else {
-                tvHeader.setText("DLNA Servers (" + items.size() + ")");
+            for (DlnaBrowser.DlnaItem d : items) {
+                String key = "dlna:" + d.url;
+                if (discoveredKeys.add(key)) {
+                    discoveredItems.add(new NetworkBrowser.NetItem(
+                            NetworkBrowser.TYPE_DLNA_SERVER, "[DLNA] " + d.title, "0",
+                            "dlna", null, 0, "", "", d.url, false));
+                }
             }
-            adapter.setItems(items);
+            if (activeServer == null) {
+                tvHeader.setText("Network");
+                refreshHubList();
+            }
+        });
+
+        // 2. SMB & FTP mDNS scan
+        networkBrowser.startMdnsDiscovery(this, item -> {
+            String key = item.protocol + ":" + item.host + ":" + item.port;
+            if (discoveredKeys.add(key)) {
+                discoveredItems.add(item);
+                if (activeServer == null) {
+                    refreshHubList();
+                }
+            }
         });
     }
 
-    private void browseFolder(String controlUrl, String objectId, String title, boolean push) {
-        currentControlUrl = controlUrl;
+    private void refreshHubList() {
+        List<NetworkBrowser.NetItem> list = new ArrayList<>();
+        list.add(new NetworkBrowser.NetItem(NetworkBrowser.TYPE_HEADER, "DISCOVERED ON LAN", null, null, null, 0, null, null, null, false));
+        if (discoveredItems.isEmpty()) {
+            list.add(new NetworkBrowser.NetItem(NetworkBrowser.TYPE_HEADER, "  Scanning for DLNA / SMB / FTP...", null, null, null, 0, null, null, null, false));
+        } else {
+            list.addAll(discoveredItems);
+        }
+
+        list.add(new NetworkBrowser.NetItem(NetworkBrowser.TYPE_HEADER, "ACTIONS & SAVED", null, null, null, 0, null, null, null, false));
+        list.add(new NetworkBrowser.NetItem(NetworkBrowser.TYPE_STREAM_URL, "[Link] Stream URL (HTTP / HLS / RTSP)", null, null, null, 0, null, null, null, false));
+        list.add(new NetworkBrowser.NetItem(NetworkBrowser.TYPE_ADD_SERVER, "[+] Add Connection (SMB / FTP)", null, null, null, 0, null, null, null, false));
+        list.addAll(NetworkBrowser.getSavedServers(this));
+
+        adapter.setItems(list);
+    }
+
+    private void openFolder(NetworkBrowser.NetItem server, String pathOrId, String title, boolean push) {
+        activeServer = server;
         if (push) {
-            folderStack.push(objectId);
+            pathStack.push(pathOrId);
             titleStack.push(title);
         }
         tvHeader.setText("Loading " + title + "...");
-        DlnaBrowser.browse(controlUrl, objectId, items -> {
-            tvHeader.setText(title + " (" + items.size() + ")");
-            adapter.setItems(items);
-        });
+
+        if ("dlna".equals(server.protocol)) {
+            DlnaBrowser.browse(server.path, pathOrId, items -> {
+                List<NetworkBrowser.NetItem> out = new ArrayList<>();
+                for (DlnaBrowser.DlnaItem d : items) {
+                    out.add(new NetworkBrowser.NetItem(
+                            d.isFolder ? NetworkBrowser.TYPE_FOLDER : NetworkBrowser.TYPE_MEDIA,
+                            d.title, d.id, "dlna", null, 0, "", "", d.url, false));
+                }
+                tvHeader.setText(title + " (" + out.size() + ")");
+                adapter.setItems(out);
+            });
+        } else if ("ftp".equals(server.protocol)) {
+            NetworkBrowser.browseFtp(server.host, server.port, server.user, server.pass, pathOrId, (items, err) -> {
+                if (err != null) Toast.makeText(this, "FTP Error: " + err, Toast.LENGTH_LONG).show();
+                tvHeader.setText(title + " (" + items.size() + ")");
+                adapter.setItems(items);
+            });
+        } else {
+            NetworkBrowser.browseSmb(server.protocol, server.host, server.port, server.user, server.pass, pathOrId, (items, err) -> {
+                if (err != null) Toast.makeText(this, "SMB Error: " + err, Toast.LENGTH_LONG).show();
+                tvHeader.setText(title + " (" + items.size() + ")");
+                adapter.setItems(items);
+            });
+        }
+    }
+
+    private void showStreamUrlDialog() {
+        EditText input = new EditText(this);
+        input.setHint("https://... or http://... or rtsp://...");
+        input.setSingleLine(true);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Stream URL")
+                .setView(input)
+                .setPositiveButton("Play", (d, w) -> {
+                    String url = input.getText().toString().trim();
+                    if (!url.isEmpty()) {
+                        launchPlayer(url, url);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showAddServerDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(36, 20, 36, 10);
+
+        Spinner protoSpinner = new Spinner(this);
+        String[] protos = {"SMB (v2/v3)", "SMB v1", "FTP"};
+        protoSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, protos));
+        layout.addView(protoSpinner);
+
+        EditText etName = new EditText(this); etName.setHint("Name (optional)"); layout.addView(etName);
+        EditText etHost = new EditText(this); etHost.setHint("Host / IP (e.g. 192.168.43.1)"); layout.addView(etHost);
+        EditText etPort = new EditText(this); etPort.setHint("Port (default: 445 SMB, 21 FTP)");
+        etPort.setInputType(InputType.TYPE_CLASS_NUMBER); layout.addView(etPort);
+        EditText etUser = new EditText(this); etUser.setHint("Username (blank = anonymous)"); layout.addView(etUser);
+        EditText etPass = new EditText(this); etPass.setHint("Password");
+        etPass.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD); layout.addView(etPass);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Add Connection")
+                .setView(layout)
+                .setPositiveButton("Save", (d, w) -> {
+                    String host = etHost.getText().toString().trim();
+                    if (host.isEmpty()) return;
+                    int pos = protoSpinner.getSelectedItemPosition();
+                    String proto = pos == 2 ? "ftp" : (pos == 1 ? "smb1" : "smb");
+                    int defaultPort = proto.equals("ftp") ? 21 : 445;
+                    int port = defaultPort;
+                    try {
+                        String pStr = etPort.getText().toString().trim();
+                        if (!pStr.isEmpty()) port = Integer.parseInt(pStr);
+                    } catch (Exception ignored) {}
+
+                    NetworkBrowser.saveServer(this, etName.getText().toString().trim(), proto, host, port,
+                            etUser.getText().toString().trim(), etPass.getText().toString());
+                    refreshHubList();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void launchPlayer(String url, String title) {
+        Intent intent = new Intent(this, PlayerActivity.class);
+        intent.setAction(Intent.ACTION_VIEW);
+        intent.setData(Uri.parse(url));
+        intent.putExtra(PlayerActivity.API_TITLE, title);
+        startActivity(intent);
     }
 
     @Override
     public void onBackPressed() {
-        if (currentControlUrl != null && folderStack.size() > 1) {
-            folderStack.pop();
+        if (activeServer != null && pathStack.size() > 1) {
+            pathStack.pop();
             titleStack.pop();
-            browseFolder(currentControlUrl, folderStack.peek(), titleStack.peek(), false);
-        } else if (currentControlUrl != null) {
-            loadDlnaServers();
+            openFolder(activeServer, pathStack.peek(), titleStack.peek(), false);
+        } else if (activeServer != null) {
+            activeServer = null;
+            pathStack.clear();
+            titleStack.clear();
+            tvHeader.setText("Network");
+            refreshHubList();
         } else {
             super.onBackPressed();
         }
     }
 
     private class BrowserAdapter extends RecyclerView.Adapter<BrowserAdapter.VH> {
-        private List<DlnaBrowser.DlnaItem> items = new ArrayList<>();
+        private List<NetworkBrowser.NetItem> items = new ArrayList<>();
 
-        void setItems(List<DlnaBrowser.DlnaItem> newItems) {
+        void setItems(List<NetworkBrowser.NetItem> newItems) {
             this.items = newItems;
             notifyDataSetChanged();
         }
@@ -106,34 +259,79 @@ public class TvHomeActivity extends Activity {
             TextView tv = new TextView(parent.getContext());
             tv.setLayoutParams(new RecyclerView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            tv.setPadding(20, 18, 20, 18);
-            tv.setTextColor(Color.WHITE);
-            tv.setTextSize(16);
-            tv.setBackgroundResource(R.drawable.tv_item_bg);
-            tv.setFocusable(true);
-            tv.setClickable(true);
             return new VH(tv);
         }
 
         @Override
         public void onBindViewHolder(@NonNull VH holder, int position) {
-            DlnaBrowser.DlnaItem item = items.get(position);
-            holder.textView.setText(item.title);
-            holder.textView.setOnClickListener(v -> {
-                if (item.isServer) {
-                    folderStack.clear();
-                    titleStack.clear();
-                    browseFolder(item.url, "0", item.title, true);
-                } else if (item.isFolder) {
-                    browseFolder(currentControlUrl, item.id, item.title.replace("[Folder] ", ""), true);
-                } else if (item.url != null) {
-                    Intent intent = new Intent(TvHomeActivity.this, PlayerActivity.class);
-                    intent.setAction(Intent.ACTION_VIEW);
-                    intent.setData(Uri.parse(item.url));
-                    intent.putExtra(PlayerActivity.API_TITLE, item.title);
-                    startActivity(intent);
+            NetworkBrowser.NetItem item = items.get(position);
+            TextView tv = holder.textView;
+            tv.setText(item.title);
+
+            if (item.type == NetworkBrowser.TYPE_HEADER) {
+                tv.setPadding(16, 22, 16, 8);
+                tv.setTextColor(Color.parseColor("#90A4AE"));
+                tv.setTextSize(13);
+                tv.setTypeface(Typeface.DEFAULT_BOLD);
+                tv.setBackground(null);
+                tv.setFocusable(false);
+                tv.setClickable(false);
+                tv.setOnClickListener(null);
+                tv.setOnLongClickListener(null);
+                return;
+            }
+
+            tv.setPadding(20, 16, 20, 16);
+            tv.setTextColor(Color.WHITE);
+            tv.setTextSize(16);
+            tv.setTypeface(Typeface.DEFAULT);
+            tv.setBackgroundResource(R.drawable.tv_item_bg);
+            tv.setFocusable(true);
+            tv.setClickable(true);
+
+            tv.setOnClickListener(v -> {
+                switch (item.type) {
+                    case NetworkBrowser.TYPE_STREAM_URL:
+                        showStreamUrlDialog();
+                        break;
+                    case NetworkBrowser.TYPE_ADD_SERVER:
+                        showAddServerDialog();
+                        break;
+                    case NetworkBrowser.TYPE_DLNA_SERVER:
+                    case NetworkBrowser.TYPE_SMB_SERVER:
+                    case NetworkBrowser.TYPE_FTP_SERVER:
+                        pathStack.clear();
+                        titleStack.clear();
+                        String startPath = "dlna".equals(item.protocol) ? "0" : "/";
+                        openFolder(item, startPath, item.title, true);
+                        break;
+                    case NetworkBrowser.TYPE_FOLDER:
+                        String nextTarget = "dlna".equals(item.protocol) ? item.id : item.path;
+                        openFolder(activeServer, nextTarget, item.title.replace("[Folder] ", ""), true);
+                        break;
+                    case NetworkBrowser.TYPE_MEDIA:
+                        if (item.path != null) {
+                            launchPlayer(item.path, item.title);
+                        }
+                        break;
                 }
             });
+
+            if (item.isSaved) {
+                tv.setOnLongClickListener(v -> {
+                    new AlertDialog.Builder(TvHomeActivity.this)
+                            .setTitle("Delete " + item.title + "?")
+                            .setPositiveButton("Delete", (d, w) -> {
+                                NetworkBrowser.deleteSavedServer(TvHomeActivity.this, Integer.parseInt(item.id));
+                                refreshHubList();
+                            })
+                            .setNegativeButton("Cancel", null)
+                            .show();
+                    return true;
+                });
+            } else {
+                tv.setOnLongClickListener(null);
+            }
         }
 
         @Override
