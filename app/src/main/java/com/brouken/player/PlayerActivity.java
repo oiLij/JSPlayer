@@ -1288,7 +1288,7 @@ public class PlayerActivity extends Activity {
                 final SubtitleParser delegate = baseSubtitleFactory.create(format);
                 return new SubtitleParser() {
                     @Override
-                    public void parse(byte[] data, int offset, int length, OutputOptions outputOptions, androidx.media3.common.util.Consumer<CuesWithTiming> output) {
+                    public void parse(byte[] data, int offset, int length, OutputOptions outputOptions, java.util.function.Consumer<CuesWithTiming> output) {
                         delegate.parse(data, offset, length, outputOptions, cues -> {
                             long shiftedStart = cues.startTimeUs == C.TIME_UNSET
                                     ? C.TIME_UNSET
