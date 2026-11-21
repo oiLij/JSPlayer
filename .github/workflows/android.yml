@@ -1,8 +1,6 @@
 name: Build JSPlayer TV (armeabi-v7a)
 
 on:
-  push:
-    branches: [custom-tv]
   workflow_dispatch:
 
 jobs:
