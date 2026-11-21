@@ -1271,13 +1271,24 @@ public class PlayerActivity extends Activity {
             );
         }
         // https://github.com/google/ExoPlayer/issues/8571
-        SubtitleParser.Factory subtitleParserFactory = new DefaultSubtitleParserFactory() {
+        final DefaultSubtitleParserFactory baseSubtitleFactory = new DefaultSubtitleParserFactory();
+        SubtitleParser.Factory subtitleParserFactory = new SubtitleParser.Factory() {
+            @Override
+            public boolean supportsFormat(Format format) {
+                return baseSubtitleFactory.supportsFormat(format);
+            }
+
+            @Override
+            public int getCueReplacementBehavior(Format format) {
+                return baseSubtitleFactory.getCueReplacementBehavior(format);
+            }
+
             @Override
             public SubtitleParser create(Format format) {
-                SubtitleParser delegate = super.create(format);
+                final SubtitleParser delegate = baseSubtitleFactory.create(format);
                 return new SubtitleParser() {
                     @Override
-                    public void parse(byte[] data, int offset, int length, OutputOptions outputOptions, Consumer<CuesWithTiming> output) {
+                    public void parse(byte[] data, int offset, int length, OutputOptions outputOptions, androidx.media3.common.util.Consumer<CuesWithTiming> output) {
                         delegate.parse(data, offset, length, outputOptions, cues -> {
                             long shiftedStart = cues.startTimeUs == C.TIME_UNSET
                                     ? C.TIME_UNSET
