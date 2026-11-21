@@ -76,6 +76,8 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import android.widget.Button;
+import androidx.media3.exoplayer.audio.ForwardingAudioSink;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -167,6 +169,8 @@ public class PlayerActivity extends Activity {
     private ImageButton buttonRotation;
     private TextView buttonPassthrough;
     private boolean passthroughEnabled = true;
+    private TextView buttonSync;
+    private long audioDelayMs = 0;
     private ImageButton exoSettings;
     private ImageButton exoPlayPause;
     private ProgressBar loadingProgressBar;
@@ -641,6 +645,17 @@ public class PlayerActivity extends Activity {
             }
             resetHideCallbacks();
         });
+
+        buttonSync = new TextView(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonSync.setId(View.generateViewId());
+        buttonSync.setGravity(Gravity.CENTER);
+        buttonSync.setTextColor(Color.WHITE);
+        buttonSync.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        buttonSync.setTypeface(Typeface.DEFAULT_BOLD);
+        buttonSync.setFocusable(true);
+        buttonSync.setClickable(true);
+        buttonSync.setText("Sync");
+        buttonSync.setOnClickListener(view -> showAudioDelayDialog());
         
         final HorizontalScrollView horizontalScrollView = (HorizontalScrollView) getLayoutInflater().inflate(R.layout.controls, null);
         final LinearLayout controls = horizontalScrollView.findViewById(R.id.controls);
@@ -648,6 +663,7 @@ public class PlayerActivity extends Activity {
         controls.addView(buttonOpen);
         controls.addView(exoSubtitle);
         controls.addView(buttonPassthrough);
+        controls.addView(buttonSync);
         controls.addView(buttonAspectRatio);
         if (Utils.isPiPSupported(this) && buttonPiP != null) {
             controls.addView(buttonPiP);
@@ -1257,14 +1273,26 @@ public class PlayerActivity extends Activity {
         @SuppressLint("WrongConstant") RenderersFactory renderersFactory = new DefaultRenderersFactory(this) {
             @Override
             protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput, boolean enableAudioTrackPlaybackParams) {
-                if (passthroughEnabled) {
-                    return super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams);
+                AudioSink baseSink = passthroughEnabled
+                        ? super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+                        : new DefaultAudioSink.Builder(context)
+                                .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+                                .setEnableFloatOutput(enableFloatOutput)
+                                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                                .build();
+                if (baseSink == null) {
+                    return null;
                 }
-                return new DefaultAudioSink.Builder(context)
-                        .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
-                        .setEnableFloatOutput(enableFloatOutput)
-                        .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                        .build();
+                return new ForwardingAudioSink(baseSink) {
+                    @Override
+                    public long getCurrentPositionUs(boolean sourceEnded) {
+                        long pos = super.getCurrentPositionUs(sourceEnded);
+                        if (pos == AudioSink.CURRENT_POSITION_NOT_SET) {
+                            return pos;
+                        }
+                        return Math.max(0L, pos + (audioDelayMs * 1000L));
+                    }
+                };
             }
         }.setExtensionRendererMode(passthroughEnabled
                 ? DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
@@ -2361,5 +2389,54 @@ public class PlayerActivity extends Activity {
                 buttonRotation.setImageResource(R.drawable.ic_screen_landscape_24dp);
             }
         }
+    }
+
+    private void showAudioDelayDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(40, 30, 40, 20);
+
+        TextView status = new TextView(this);
+        status.setTextSize(18);
+        status.setGravity(Gravity.CENTER);
+        status.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
+        layout.addView(status);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(0, 24, 0, 0);
+
+        Button btnMinus = new Button(this);
+        btnMinus.setText("-50 ms");
+        btnMinus.setOnClickListener(v -> {
+            audioDelayMs -= 50;
+            status.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
+        });
+
+        Button btnReset = new Button(this);
+        btnReset.setText("Reset");
+        btnReset.setOnClickListener(v -> {
+            audioDelayMs = 0;
+            status.setText("Audio Delay: 0 ms");
+        });
+
+        Button btnPlus = new Button(this);
+        btnPlus.setText("+50 ms");
+        btnPlus.setOnClickListener(v -> {
+            audioDelayMs += 50;
+            status.setText("Audio Delay: " + (audioDelayMs > 0 ? "+" : "") + audioDelayMs + " ms");
+        });
+
+        row.addView(btnMinus);
+        row.addView(btnReset);
+        row.addView(btnPlus);
+        layout.addView(row);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Audio Sync")
+                .setView(layout)
+                .setPositiveButton("Done", null)
+                .show();
     }
 }
