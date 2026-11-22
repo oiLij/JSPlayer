@@ -246,6 +246,7 @@ public class TvHomeActivity extends Activity {
             tvHeader.setText("Network");
             refreshHubList();
         } else {
+            PlayerActivity.stopBackgroundAudio();
             super.onBackPressed();
         }
     }
