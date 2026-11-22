@@ -855,6 +855,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onPause() {
+        saveVideoResumePosition();
         super.onPause();
         savePlayer();
     }
@@ -1612,7 +1613,6 @@ public class PlayerActivity extends Activity {
         TrackPrefHelper.applyToPlayer(this, player);
         player.prepare();
         resumeDialogShownForCurrentItem = false;
-        checkAndShowVideoResumeDialog();
         if (haveMedia && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
             long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
                     .getLong(mPrefs.mediaUri.toString(), 0);
@@ -1673,16 +1673,7 @@ public class PlayerActivity extends Activity {
             return;
         }
 
-        if (player != null && mPrefs != null && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
-            long pos = player.getCurrentPosition();
-            long dur = player.getDuration();
-            android.content.SharedPreferences rsp = getSharedPreferences("jsplayer_resume", MODE_PRIVATE);
-            if (dur > 0 && pos > 5000 && pos < dur - 10000) {
-                rsp.edit().putLong(mPrefs.mediaUri.toString(), pos).apply();
-            } else if (dur > 0 && pos >= dur - 10000) {
-                rsp.edit().remove(mPrefs.mediaUri.toString()).apply();
-            }
-        }
+        saveVideoResumePosition();
         
         releasePlayer(true);
     }
@@ -1818,6 +1809,9 @@ public class PlayerActivity extends Activity {
         @SuppressLint("SourceLockedOrientationActivity")
         @Override
         public void onPlaybackStateChanged(int state) {
+            if (playbackState == Player.STATE_READY) {
+                checkAndShowVideoResumeDialog();
+            }
             boolean isNearEnd = false;
             final long duration = player.getDuration();
             if (duration != C.TIME_UNSET) {
@@ -3150,15 +3144,42 @@ public class PlayerActivity extends Activity {
         return null;
     }
 
+
+    private Uri getActiveMediaUri() {
+        if (player != null && player.getCurrentMediaItem() != null
+                && player.getCurrentMediaItem().localConfiguration != null
+                && player.getCurrentMediaItem().localConfiguration.uri != null) {
+            return player.getCurrentMediaItem().localConfiguration.uri;
+        }
+        if (mPrefs != null && mPrefs.mediaUri != null) {
+            return mPrefs.mediaUri;
+        }
+        return getIntent() != null ? getIntent().getData() : null;
+    }
+
+    private void saveVideoResumePosition() {
+        Uri uri = getActiveMediaUri();
+        if (player == null || uri == null || isAudioUri(uri)) return;
+        long pos = player.getCurrentPosition();
+        long dur = player.getDuration();
+        android.content.SharedPreferences rsp = getSharedPreferences("jsplayer_resume", MODE_PRIVATE);
+        if (dur > 0 && pos > 5000 && pos < dur - 10000) {
+            rsp.edit().putLong(uri.toString(), pos).apply();
+        } else if (dur > 0 && pos >= dur - 10000) {
+            rsp.edit().remove(uri.toString()).apply();
+        }
+    }
+
     private void checkAndShowVideoResumeDialog() {
-        if (resumeDialogShownForCurrentItem || player == null || mPrefs == null || mPrefs.mediaUri == null) return;
-        if (isAudioUri(mPrefs.mediaUri)) return;
+        Uri uri = getActiveMediaUri();
+        if (resumeDialogShownForCurrentItem || player == null || uri == null || isAudioUri(uri)) return;
 
         long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
-                .getLong(mPrefs.mediaUri.toString(), 0);
+                .getLong(uri.toString(), 0);
         if (savedPos <= 5000) return;
 
         resumeDialogShownForCurrentItem = true;
+        player.setPlayWhenReady(false);
         player.pause();
 
         long sec = savedPos / 1000;
@@ -3170,19 +3191,20 @@ public class PlayerActivity extends Activity {
                 .setPositiveButton("Resume", (d, w) -> {
                     if (player != null) {
                         player.seekTo(savedPos);
+                        player.setPlayWhenReady(true);
                         player.play();
                     }
                 })
                 .setNegativeButton("Start Over", (d, w) -> {
                     if (player != null) {
                         player.seekTo(0);
+                        player.setPlayWhenReady(true);
                         player.play();
                     }
                 })
                 .setCancelable(false)
                 .show();
 
-        // Focus "Resume" by default for 1-click OK on TV remote
         android.widget.Button posBtn = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
         if (posBtn != null) posBtn.requestFocus();
     }
