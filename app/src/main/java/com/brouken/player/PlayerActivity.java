@@ -125,6 +125,8 @@ import java.util.concurrent.TimeUnit;
 public class PlayerActivity extends Activity {
 
     private boolean sdhAppliedForCurrentItem = false;
+    private long preSkipPositionMs = -1;
+    private boolean resumeDialogShownForCurrentItem = false;
     
     private List<ChapterHelper.ChapterItem> activeChapters = new ArrayList<>();
     private android.widget.Button btnSkipChapter;
@@ -1609,6 +1611,8 @@ public class PlayerActivity extends Activity {
         sdhAppliedForCurrentItem = false;
         TrackPrefHelper.applyToPlayer(this, player);
         player.prepare();
+        resumeDialogShownForCurrentItem = false;
+        checkAndShowVideoResumeDialog();
         if (haveMedia && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
             long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
                     .getLong(mPrefs.mediaUri.toString(), 0);
@@ -1668,6 +1672,17 @@ public class PlayerActivity extends Activity {
             }
             return;
         }
+
+        if (player != null && mPrefs != null && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
+            long pos = player.getCurrentPosition();
+            long dur = player.getDuration();
+            android.content.SharedPreferences rsp = getSharedPreferences("jsplayer_resume", MODE_PRIVATE);
+            if (dur > 0 && pos > 5000 && pos < dur - 10000) {
+                rsp.edit().putLong(mPrefs.mediaUri.toString(), pos).apply();
+            } else if (dur > 0 && pos >= dur - 10000) {
+                rsp.edit().remove(mPrefs.mediaUri.toString()).apply();
+            }
+        }
         
         releasePlayer(true);
     }
@@ -1713,6 +1728,38 @@ public class PlayerActivity extends Activity {
     }
 
     private class PlayerListener implements Player.Listener {
+        @Override
+        public void onIsPlayingChanged(boolean isPlaying) {
+            android.widget.ImageButton btnPlayPause = findViewById(R.id.btn_bl_play_pause);
+            if (btnPlayPause != null) {
+                btnPlayPause.setImageResource(isPlaying
+                        ? android.R.drawable.ic_media_pause
+                        : android.R.drawable.ic_media_play);
+            }
+        }
+
+        @Override
+        public void onMediaItemTransition(@androidx.annotation.Nullable androidx.media3.common.MediaItem mediaItem, int reason) {
+            if (mediaItem != null) {
+                sdhAppliedForCurrentItem = false;
+                lastShownSkipChapterIndex = -1;
+                preSkipPositionMs = -1;
+
+                CharSequence newTitle = (mediaItem.mediaMetadata != null && mediaItem.mediaMetadata.title != null)
+                        ? mediaItem.mediaMetadata.title : null;
+                if (newTitle == null && mediaItem.localConfiguration != null && mediaItem.localConfiguration.uri != null) {
+                    String seg = mediaItem.localConfiguration.uri.getLastPathSegment();
+                    if (seg != null) newTitle = seg;
+                }
+                if (newTitle != null && titleView != null) {
+                    titleView.setText(newTitle);
+                    titleView.setVisibility(View.VISIBLE);
+                }
+                if (mediaItem.localConfiguration != null && mediaItem.localConfiguration.uri != null && mPrefs != null) {
+                    mPrefs.mediaUri = mediaItem.localConfiguration.uri;
+                }
+            }
+        }
         @Override
         public void onTracksChanged(androidx.media3.common.Tracks tracks) {
             activeChapters = ChapterHelper.extractChapters(tracks);
@@ -2739,8 +2786,27 @@ public class PlayerActivity extends Activity {
         int idx = ChapterHelper.findChapterIndex(activeChapters, pos);
         if (idx < 0 || idx == lastShownSkipChapterIndex) return;
 
-        // Always update tracked chapter so seeking/re-entering works reliably
         lastShownSkipChapterIndex = idx;
+        boolean isLast = (idx == activeChapters.size() - 1);
+
+        // If user just skipped directly into the last chapter, offer "Go Back" for 2 seconds
+        if (isLast && preSkipPositionMs >= 0) {
+            final long returnPos = preSkipPositionMs;
+            preSkipPositionMs = -1;
+            btnSkipChapter.setText("↩ Go Back");
+            btnSkipChapter.setVisibility(View.VISIBLE);
+            btnSkipChapter.bringToFront();
+            btnSkipChapter.requestFocus();
+            btnSkipChapter.setOnClickListener(v -> {
+                skipHandler.removeCallbacks(hideSkipRunnable);
+                btnSkipChapter.setVisibility(View.GONE);
+                lastShownSkipChapterIndex = -1;
+                player.seekTo(returnPos);
+            });
+            skipHandler.removeCallbacks(hideSkipRunnable);
+            skipHandler.postDelayed(hideSkipRunnable, 2000);
+            return;
+        }
 
         long showMs = ChapterHelper.getSkipShowDurationMs(idx, activeChapters.size());
         if (showMs <= 0) {
@@ -2749,11 +2815,9 @@ public class PlayerActivity extends Activity {
             return;
         }
 
-        // Trigger within first 15 seconds of entering that chapter (handles buffering/keyframe seeks)
         if (pos - activeChapters.get(idx).startMs > 15000) return;
 
         ChapterHelper.ChapterItem ch = activeChapters.get(idx);
-        boolean isLast = (idx == activeChapters.size() - 1);
         String label = isLast && player.hasNextMediaItem() ? "Next Episode" : "Skip " + ch.title;
 
         btnSkipChapter.setText(label);
@@ -2766,6 +2830,7 @@ public class PlayerActivity extends Activity {
             if (isLast && player.hasNextMediaItem()) {
                 player.seekToNextMediaItem();
             } else {
+                preSkipPositionMs = player.getCurrentPosition();
                 long target = ChapterHelper.getSkipTargetMs(activeChapters, idx, player.getDuration());
                 player.seekTo(target);
             }
@@ -2972,12 +3037,12 @@ public class PlayerActivity extends Activity {
         View centerControls = findViewById(androidx.media3.ui.R.id.exo_center_controls);
         View blControls = findViewById(R.id.bottom_left_controls);
         View exoTime = findViewById(androidx.media3.ui.R.id.exo_time);
+        View exoProgress = findViewById(androidx.media3.ui.R.id.exo_progress);
 
         boolean bottomLeft = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
                 .getBoolean("controls_bottom_left", true);
 
         if (centerControls != null) {
-            // Reset center gravity/margins so Center mode is always centered
             android.view.ViewGroup.LayoutParams rawLp = centerControls.getLayoutParams();
             if (rawLp instanceof android.widget.FrameLayout.LayoutParams) {
                 android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) rawLp;
@@ -2985,12 +3050,36 @@ public class PlayerActivity extends Activity {
                 lp.setMargins(0, 0, 0, 0);
                 centerControls.setLayoutParams(lp);
             }
-            // Hide completely when Bottom-Left is ON (alpha + scale prevents Media3 from unhiding it)
             centerControls.setVisibility(bottomLeft ? View.GONE : View.VISIBLE);
             centerControls.setAlpha(bottomLeft ? 0f : 1f);
             centerControls.setScaleX(bottomLeft ? 0f : 1f);
             centerControls.setScaleY(bottomLeft ? 0f : 1f);
             centerControls.setEnabled(!bottomLeft);
+            if (centerControls instanceof android.view.ViewGroup) {
+                ((android.view.ViewGroup) centerControls).setDescendantFocusability(
+                        bottomLeft ? android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS : android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS);
+            }
+
+            // Force center Prev/Next visible when Center mode is active
+            View centerPrev = centerControls.findViewById(androidx.media3.ui.R.id.exo_prev);
+            View centerNext = centerControls.findViewById(androidx.media3.ui.R.id.exo_next);
+            if (!bottomLeft) {
+                if (centerPrev != null) {
+                    centerPrev.setVisibility(View.VISIBLE);
+                    centerPrev.setOnClickListener(v -> {
+                        if (player != null) {
+                            if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem();
+                            else player.seekTo(0);
+                        }
+                    });
+                }
+                if (centerNext != null) {
+                    centerNext.setVisibility(View.VISIBLE);
+                    centerNext.setOnClickListener(v -> {
+                        if (player != null && player.hasNextMediaItem()) player.seekToNextMediaItem();
+                    });
+                }
+            }
         }
 
         if (blControls != null) {
@@ -3001,6 +3090,11 @@ public class PlayerActivity extends Activity {
             float d = getResources().getDisplayMetrics().density;
             lp.setMarginStart(bottomLeft ? (int) (136 * d) : 0);
             exoTime.setLayoutParams(lp);
+        }
+
+        // Pressing DOWN from seek bar lands directly on Bottom-Left Play/Pause
+        if (exoProgress != null) {
+            exoProgress.setNextFocusDownId(bottomLeft ? R.id.btn_bl_play_pause : View.NO_ID);
         }
 
         View btnPrev = findViewById(R.id.btn_bl_prev);
@@ -3030,13 +3124,8 @@ public class PlayerActivity extends Activity {
                     ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
             btnPlayPause.setOnClickListener(v -> {
                 if (player != null) {
-                    if (player.isPlaying()) {
-                        player.pause();
-                        btnPlayPause.setImageResource(android.R.drawable.ic_media_play);
-                    } else {
-                        player.play();
-                        btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
-                    }
+                    if (player.isPlaying()) player.pause();
+                    else player.play();
                 }
             });
         }
@@ -3062,5 +3151,42 @@ public class PlayerActivity extends Activity {
             return player.getCurrentMediaItem().localConfiguration.uri;
         }
         return null;
+    }
+
+    private void checkAndShowVideoResumeDialog() {
+        if (resumeDialogShownForCurrentItem || player == null || mPrefs == null || mPrefs.mediaUri == null) return;
+        if (isAudioUri(mPrefs.mediaUri)) return;
+
+        long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
+                .getLong(mPrefs.mediaUri.toString(), 0);
+        if (savedPos <= 5000) return;
+
+        resumeDialogShownForCurrentItem = true;
+        player.pause();
+
+        long sec = savedPos / 1000;
+        String timeStr = String.format(java.util.Locale.US, "%d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60);
+
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                .setTitle("Resume Playback?")
+                .setMessage("Continue from " + timeStr + "?")
+                .setPositiveButton("Resume", (d, w) -> {
+                    if (player != null) {
+                        player.seekTo(savedPos);
+                        player.play();
+                    }
+                })
+                .setNegativeButton("Start Over", (d, w) -> {
+                    if (player != null) {
+                        player.seekTo(0);
+                        player.play();
+                    }
+                })
+                .setCancelable(false)
+                .show();
+
+        // Focus "Resume" by default for 1-click OK on TV remote
+        android.widget.Button posBtn = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+        if (posBtn != null) posBtn.requestFocus();
     }
 }
