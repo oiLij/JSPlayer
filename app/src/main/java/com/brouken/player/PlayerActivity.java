@@ -1512,6 +1512,26 @@ public class PlayerActivity extends Activity {
 
         player.addListener(playerListener);
         player.prepare();
+        if (haveMedia && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
+            long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
+                    .getLong(mPrefs.mediaUri.toString(), 0);
+            if (savedPos > 5000) {
+                player.setPlayWhenReady(false);
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle("Resume Video?")
+                        .setMessage("Last position: " + formatTime(savedPos))
+                        .setCancelable(false)
+                        .setPositiveButton("Resume", (d, w) -> {
+                            player.seekTo(savedPos);
+                            player.setPlayWhenReady(true);
+                        })
+                        .setNegativeButton("Start Over", (d, w) -> {
+                            player.seekTo(0);
+                            player.setPlayWhenReady(true);
+                        })
+                        .show();
+            }
+        }
 
         if (restorePlayState) {
             restorePlayState = false;
@@ -1562,6 +1582,17 @@ public class PlayerActivity extends Activity {
             }
             player.removeListener(playerListener);
             player.clearMediaItems();
+            if (player != null && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
+                long pos = player.getCurrentPosition();
+                long dur = player.getDuration();
+                android.content.SharedPreferences sp = getSharedPreferences("jsplayer_resume", MODE_PRIVATE);
+                String key = mPrefs.mediaUri.toString();
+                if (pos > 5000 && (dur <= 0 || pos < dur - 10000)) {
+                    sp.edit().putLong(key, pos).apply();
+                } else if (dur > 0 && pos >= dur - 10000) {
+                    sp.edit().remove(key).apply(); // Cleared once video finishes
+                }
+            }
             player.release();
             player = null;
         }
@@ -2559,5 +2590,20 @@ public class PlayerActivity extends Activity {
                     }
                 })
                 .show();
+    }
+
+    private boolean isAudioUri(Uri uri) {
+        if (uri == null || uri.getPath() == null) return false;
+        String p = uri.getPath().toLowerCase();
+        return p.endsWith(".flac") || p.endsWith(".mp3") || p.endsWith(".m4a")
+                || p.endsWith(".wav") || p.endsWith(".ogg") || p.endsWith(".opus") || p.endsWith(".aac");
+    }
+
+    private String formatTime(long ms) {
+        long totalSec = ms / 1000;
+        long h = totalSec / 3600;
+        long m = (totalSec % 3600) / 60;
+        long s = totalSec % 60;
+        return h > 0 ? String.format("%d:%02d:%02d", h, m, s) : String.format("%02d:%02d", m, s);
     }
 }
