@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
@@ -283,7 +284,6 @@ public class TvHomeActivity extends Activity {
 
     private class BrowserAdapter extends RecyclerView.Adapter<BrowserAdapter.VH> {
         private List<NetworkBrowser.NetItem> items = new ArrayList<>();
-
         void setItems(List<NetworkBrowser.NetItem> newItems) {
             if (activeServer != null) {
                 tvList.setDescendantFocusability(android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS);
@@ -297,15 +297,6 @@ public class TvHomeActivity extends Activity {
                 }
             });
         }
-            this.items = newItems;
-            notifyDataSetChanged();
-            tvList.post(() -> {
-                if (activeServer != null && tvList.getChildCount() > 0) {
-                    tvList.getChildAt(0).requestFocus();
-                }
-            });
-        }
-
         @NonNull
         @Override
         public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
