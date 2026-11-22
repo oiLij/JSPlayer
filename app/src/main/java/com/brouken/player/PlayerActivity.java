@@ -1071,6 +1071,16 @@ public class PlayerActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (btnSkipChapter != null && btnSkipChapter.getVisibility() == View.VISIBLE) {
+            int code = event.getKeyCode();
+            if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    btnSkipChapter.performClick();
+                }
+                return true;
+            }
+        }
+
         if (isScaling) {
             final int keyCode = event.getKeyCode();
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -1109,7 +1119,7 @@ public class PlayerActivity extends Activity {
             return super.dispatchKeyEvent(event);
         }
     }
-
+    
     @Override
     public boolean onGenericMotionEvent(MotionEvent event) {
         if (0 != (event.getSource() & InputDevice.SOURCE_CLASS_POINTER)) {
@@ -2960,30 +2970,78 @@ public class PlayerActivity extends Activity {
     
     private void applyPlaybackControlsPosition() {
         View centerControls = findViewById(androidx.media3.ui.R.id.exo_center_controls);
-        if (centerControls == null) return;
+        View blControls = findViewById(R.id.bottom_left_controls);
+        View exoTime = findViewById(androidx.media3.ui.R.id.exo_time);
 
         boolean bottomLeft = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
                 .getBoolean("controls_bottom_left", true);
 
-        android.view.ViewGroup.LayoutParams rawLp = centerControls.getLayoutParams();
-        if (rawLp instanceof android.widget.FrameLayout.LayoutParams) {
-            android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) rawLp;
-            float density = getResources().getDisplayMetrics().density;
-            if (bottomLeft) {
-                lp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
-                lp.setMargins((int) (20 * density), 0, 0, (int) (72 * density));
-                centerControls.setScaleX(0.85f);
-                centerControls.setScaleY(0.85f);
-            } else {
+        if (centerControls != null) {
+            // Reset center gravity/margins so Center mode is always centered
+            android.view.ViewGroup.LayoutParams rawLp = centerControls.getLayoutParams();
+            if (rawLp instanceof android.widget.FrameLayout.LayoutParams) {
+                android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) rawLp;
                 lp.gravity = android.view.Gravity.CENTER;
                 lp.setMargins(0, 0, 0, 0);
-                centerControls.setScaleX(1.0f);
-                centerControls.setScaleY(1.0f);
+                centerControls.setLayoutParams(lp);
             }
-            centerControls.setLayoutParams(lp);
+            // Hide completely when Bottom-Left is ON (alpha + scale prevents Media3 from unhiding it)
+            centerControls.setVisibility(bottomLeft ? View.GONE : View.VISIBLE);
+            centerControls.setAlpha(bottomLeft ? 0f : 1f);
+            centerControls.setScaleX(bottomLeft ? 0f : 1f);
+            centerControls.setScaleY(bottomLeft ? 0f : 1f);
+            centerControls.setEnabled(!bottomLeft);
+        }
+
+        if (blControls != null) {
+            blControls.setVisibility(bottomLeft ? View.VISIBLE : View.GONE);
+        }
+        if (exoTime != null) {
+            android.view.ViewGroup.MarginLayoutParams lp = (android.view.ViewGroup.MarginLayoutParams) exoTime.getLayoutParams();
+            float d = getResources().getDisplayMetrics().density;
+            lp.setMarginStart(bottomLeft ? (int) (136 * d) : 0);
+            exoTime.setLayoutParams(lp);
+        }
+
+        View btnPrev = findViewById(R.id.btn_bl_prev);
+        View btnNext = findViewById(R.id.btn_bl_next);
+        android.widget.ImageButton btnPlayPause = findViewById(R.id.btn_bl_play_pause);
+
+        if (btnPrev != null) {
+            btnPrev.setClickable(true);
+            btnPrev.setOnClickListener(v -> {
+                if (player != null) {
+                    if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem();
+                    else player.seekTo(0);
+                }
+            });
+        }
+        if (btnNext != null) {
+            btnNext.setClickable(true);
+            btnNext.setOnClickListener(v -> {
+                if (player != null && player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem();
+                }
+            });
+        }
+        if (btnPlayPause != null) {
+            btnPlayPause.setClickable(true);
+            btnPlayPause.setImageResource(player != null && player.isPlaying()
+                    ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+            btnPlayPause.setOnClickListener(v -> {
+                if (player != null) {
+                    if (player.isPlaying()) {
+                        player.pause();
+                        btnPlayPause.setImageResource(android.R.drawable.ic_media_play);
+                    } else {
+                        player.play();
+                        btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
+                    }
+                }
+            });
         }
     }
-
+    
     public static void stopBackgroundAudio() {
         if (player != null) {
             try {
@@ -2992,5 +3050,17 @@ public class PlayerActivity extends Activity {
             } catch (Exception ignored) {}
             player = null;
         }
+    }
+
+    public static boolean isBackgroundAudioPlaying() {
+        return player != null && player.isPlaying();
+    }
+
+    public static Uri getBackgroundAudioUri() {
+        if (player != null && player.getCurrentMediaItem() != null
+                && player.getCurrentMediaItem().localConfiguration != null) {
+            return player.getCurrentMediaItem().localConfiguration.uri;
+        }
+        return null;
     }
 }
