@@ -78,13 +78,13 @@
         android:orientation="vertical">
 
         <TextView
-            android:id="@+id/Network"
+            android:id="@+id/tv_header"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
             android:padding="8dp"
-            android:text="DLNA Servers"
+            android:text="Network"
             android:textColor="#B0BEC5"
             android:textSize="16sp"
             android:textStyle="bold" />
