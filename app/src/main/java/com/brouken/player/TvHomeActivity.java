@@ -36,6 +36,36 @@ public class TvHomeActivity extends Activity {
     private final List<NetworkBrowser.NetItem> discoveredItems = new ArrayList<>();
     private final Set<String> discoveredKeys = new HashSet<>();
 
+    private android.widget.Button btnNowPlaying;
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (btnNowPlaying == null) {
+            btnNowPlaying = new android.widget.Button(this);
+            btnNowPlaying.setText("▶ Now Playing (Open)");
+            btnNowPlaying.setTextColor(android.graphics.Color.WHITE);
+            btnNowPlaying.setBackgroundColor(android.graphics.Color.parseColor("#E61E88E5"));
+            btnNowPlaying.setPadding(24, 12, 24, 12);
+            btnNowPlaying.setFocusable(true);
+            android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                    android.view.Gravity.TOP | android.view.Gravity.END);
+            lp.setMargins(0, 16, 24, 0);
+            addContentView(btnNowPlaying, lp);
+            btnNowPlaying.setOnClickListener(v -> {
+                android.net.Uri u = PlayerActivity.getBackgroundAudioUri();
+                if (u != null) {
+                    android.content.Intent i = new android.content.Intent(this, PlayerActivity.class);
+                    i.setData(u);
+                    startActivity(i);
+                }
+            });
+        }
+        btnNowPlaying.setVisibility(PlayerActivity.isBackgroundAudioPlaying() ? View.VISIBLE : View.GONE);
+    }
+
     // Active browse state
     private NetworkBrowser.NetItem activeServer = null;
     private final Stack<String> pathStack = new Stack<>();
@@ -255,6 +285,18 @@ public class TvHomeActivity extends Activity {
         private List<NetworkBrowser.NetItem> items = new ArrayList<>();
 
         void setItems(List<NetworkBrowser.NetItem> newItems) {
+            if (activeServer != null) {
+                tvList.setDescendantFocusability(android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+                tvList.requestFocus();
+            }
+            this.items = newItems;
+            notifyDataSetChanged();
+            tvList.post(() -> {
+                if (activeServer != null && tvList.getChildCount() > 0) {
+                    tvList.getChildAt(0).requestFocus();
+                }
+            });
+        }
             this.items = newItems;
             notifyDataSetChanged();
             tvList.post(() -> {
