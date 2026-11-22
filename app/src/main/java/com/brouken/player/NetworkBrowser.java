@@ -18,6 +18,8 @@ import java.net.InetAddress;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -83,6 +85,23 @@ public class NetworkBrowser {
     private NsdManager.DiscoveryListener smbListener;
     private NsdManager.DiscoveryListener ftpListener;
 
+    private final Queue<PendingResolve> resolveQueue = new LinkedList<>();
+    private boolean isResolving = false;
+    
+    private static class PendingResolve {
+        final NsdServiceInfo service;
+        final String proto;
+        final int itemType;
+        final DiscoveryCallback callback;
+    
+        PendingResolve(NsdServiceInfo service, String proto, int itemType, DiscoveryCallback callback) {
+            this.service = service;
+            this.proto = proto;
+            this.itemType = itemType;
+            this.callback = callback;
+        }
+    }
+
     public void startMdnsDiscovery(Context context, DiscoveryCallback callback) {
         stopMdnsDiscovery();
         nsdManager = (NsdManager) context.getSystemService(Context.NSD_SERVICE);
@@ -106,27 +125,53 @@ public class NetworkBrowser {
             @Override public void onStartDiscoveryFailed(String serviceType, int errorCode) {}
             @Override public void onStopDiscoveryFailed(String serviceType, int errorCode) {}
             @Override public void onServiceLost(NsdServiceInfo service) {}
-
+    
             @Override
             public void onServiceFound(NsdServiceInfo service) {
-                try {
-                    nsdManager.resolveService(service, new NsdManager.ResolveListener() {
-                        @Override public void onResolveFailed(NsdServiceInfo info, int errorCode) {}
-                        @Override
-                        public void onServiceResolved(NsdServiceInfo info) {
-                            InetAddress addr = info.getHost();
-                            if (addr == null) return;
-                            String host = addr.getHostAddress();
-                            int port = info.getPort();
-                            String tag = proto.equals("smb") ? "[SMB] " : "[FTP] ";
-                            String title = tag + info.getServiceName() + " (" + host + ":" + port + ")";
-                            NetItem item = new NetItem(itemType, title, null, proto, host, port, "", "", "/", false);
-                            mainHandler.post(() -> callback.onFound(item));
-                        }
-                    });
-                } catch (Exception ignored) {}
+                synchronized (resolveQueue) {
+                    resolveQueue.add(new PendingResolve(service, proto, itemType, callback));
+                    if (!isResolving) {
+                        resolveNext();
+                    }
+                }
             }
         };
+    }
+    
+    private void resolveNext() {
+        PendingResolve next;
+        synchronized (resolveQueue) {
+            next = resolveQueue.poll();
+            if (next == null) {
+                isResolving = false;
+                return;
+            }
+            isResolving = true;
+        }
+        try {
+            nsdManager.resolveService(next.service, new NsdManager.ResolveListener() {
+                @Override
+                public void onResolveFailed(NsdServiceInfo info, int errorCode) {
+                    resolveNext();
+                }
+    
+                @Override
+                public void onServiceResolved(NsdServiceInfo info) {
+                    InetAddress addr = info.getHost();
+                    if (addr != null) {
+                        String host = addr.getHostAddress();
+                        int port = info.getPort();
+                        String tag = next.proto.equals("smb") ? "[SMB] " : "[FTP] ";
+                        String title = tag + info.getServiceName() + " (" + host + ":" + port + ")";
+                        NetItem item = new NetItem(next.itemType, title, null, next.proto, host, port, "", "", "/", false);
+                        mainHandler.post(() -> next.callback.onFound(item));
+                    }
+                    resolveNext();
+                }
+            });
+        } catch (Exception e) {
+            resolveNext();
+        }
     }
 
     public void stopMdnsDiscovery() {
@@ -136,6 +181,10 @@ public class NetworkBrowser {
         }
         smbListener = null;
         ftpListener = null;
+        synchronized (resolveQueue) {
+            resolveQueue.clear();
+            isResolving = false;
+        }
     }
 
     public static void browseFtp(String host, int port, String user, String pass, String dirPath, ListCallback callback) {
