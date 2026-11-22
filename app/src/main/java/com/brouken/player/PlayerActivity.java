@@ -137,7 +137,7 @@ public class PlayerActivity extends Activity {
         @Override
         public void run() {
             checkChapterSkip();
-            skipHandler.postDelayed(this, 1000);
+            skipHandler.postDelayed(this, 500);
         }
     };
     
@@ -706,15 +706,17 @@ public class PlayerActivity extends Activity {
         btnSkipChapter = new android.widget.Button(this);
         btnSkipChapter.setVisibility(View.GONE);
         btnSkipChapter.setTextColor(android.graphics.Color.WHITE);
-        btnSkipChapter.setBackgroundColor(android.graphics.Color.parseColor("#CC1E88E5"));
+        btnSkipChapter.setBackgroundColor(android.graphics.Color.parseColor("#E61E88E5"));
         btnSkipChapter.setPadding(32, 18, 32, 18);
         btnSkipChapter.setFocusable(true);
+        btnSkipChapter.setElevation(100f);
         android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
                 android.view.Gravity.BOTTOM | android.view.Gravity.END);
         lp.setMargins(0, 0, 48, 150);
         addContentView(btnSkipChapter, lp);
+        btnSkipChapter.bringToFront();
         
         final HorizontalScrollView horizontalScrollView = (HorizontalScrollView) getLayoutInflater().inflate(R.layout.controls, null);
         final LinearLayout controls = horizontalScrollView.findViewById(R.id.controls);
@@ -2710,19 +2712,26 @@ public class PlayerActivity extends Activity {
         int idx = ChapterHelper.findChapterIndex(activeChapters, pos);
         if (idx < 0 || idx == lastShownSkipChapterIndex) return;
 
-        long showMs = ChapterHelper.getSkipShowDurationMs(idx, activeChapters.size());
-        if (showMs <= 0) return;
-
-        // Only trigger within first 8 seconds of entering that chapter
-        if (pos - activeChapters.get(idx).startMs > 8000) return;
-
+        // Always update tracked chapter so seeking/re-entering works reliably
         lastShownSkipChapterIndex = idx;
+
+        long showMs = ChapterHelper.getSkipShowDurationMs(idx, activeChapters.size());
+        if (showMs <= 0) {
+            skipHandler.removeCallbacks(hideSkipRunnable);
+            btnSkipChapter.setVisibility(View.GONE);
+            return;
+        }
+
+        // Trigger within first 15 seconds of entering that chapter (handles buffering/keyframe seeks)
+        if (pos - activeChapters.get(idx).startMs > 15000) return;
+
         ChapterHelper.ChapterItem ch = activeChapters.get(idx);
         boolean isLast = (idx == activeChapters.size() - 1);
         String label = isLast && player.hasNextMediaItem() ? "Next Episode" : "Skip " + ch.title;
 
         btnSkipChapter.setText(label);
         btnSkipChapter.setVisibility(View.VISIBLE);
+        btnSkipChapter.bringToFront();
         btnSkipChapter.requestFocus();
         btnSkipChapter.setOnClickListener(v -> {
             skipHandler.removeCallbacks(hideSkipRunnable);
