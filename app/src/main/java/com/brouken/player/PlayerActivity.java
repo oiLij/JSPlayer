@@ -124,6 +124,8 @@ import java.util.concurrent.TimeUnit;
 
 public class PlayerActivity extends Activity {
 
+    private boolean sdhAppliedForCurrentItem = false;
+    
     private List<ChapterHelper.ChapterItem> activeChapters = new ArrayList<>();
     private android.widget.Button btnSkipChapter;
     private int lastShownSkipChapterIndex = -1;
@@ -1567,6 +1569,8 @@ public class PlayerActivity extends Activity {
         }
 
         player.addListener(playerListener);
+        sdhAppliedForCurrentItem = false;
+        TrackPrefHelper.applyToPlayer(this, player);
         player.prepare();
         if (haveMedia && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
             long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
@@ -1668,6 +1672,10 @@ public class PlayerActivity extends Activity {
             skipHandler.removeCallbacks(chapterMonitorRunnable);
             if (!activeChapters.isEmpty()) {
                 skipHandler.post(chapterMonitorRunnable);
+            }
+            if (!sdhAppliedForCurrentItem && !tracks.isEmpty()) {
+                sdhAppliedForCurrentItem = true;
+                TrackPrefHelper.applySmartSdhOverride(PlayerActivity.this, player, tracks);
             }
         }
         
@@ -2739,7 +2747,8 @@ public class PlayerActivity extends Activity {
                 "Search Online - OpenSubtitles (No API Key)",
                 "Search Online - SubDL (Needs API key - add manually)",
                 "Secondary Language: " + secLang,
-                "Set SubDL API Key"
+                "Set SubDL API Key",
+                "Default Audio & Subtitle Languages"
         };
         new android.app.AlertDialog.Builder(this)
                 .setTitle("Add Subtitles")
@@ -2755,13 +2764,57 @@ public class PlayerActivity extends Activity {
                         showOnlineSubSearchDialog(true);
                     } else if (which == 3) {
                         showSecondaryLangDialog();
-                    } else {
+                    } else if (which == 4) {
                         showSubdlKeyDialog();
+                    } else if (which == 5) {
+                        showDefaultLanguagesDialog();
                     }
                 })
                 .show();
     }
 
+    private void showDefaultLanguagesDialog() {
+        String[] items = {
+                "1st Audio: " + TrackPrefHelper.LANG_LABELS[TrackPrefHelper.getAudio1(this)],
+                "2nd Audio: " + TrackPrefHelper.LANG_LABELS[TrackPrefHelper.getAudio2(this)],
+                "1st Subtitle: " + TrackPrefHelper.LANG_LABELS[TrackPrefHelper.getSub1(this)],
+                "2nd Subtitle: " + TrackPrefHelper.LANG_LABELS[TrackPrefHelper.getSub2(this)],
+                "SDH Mode: " + TrackPrefHelper.SUB_SDH_MODES[TrackPrefHelper.getSdhMode(this)]
+        };
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Default Audio & Subtitle Languages")
+                .setItems(items, (d, which) -> {
+                    if (which == 4) {
+                        new android.app.AlertDialog.Builder(this)
+                                .setTitle("Subtitle SDH Mode")
+                                .setSingleChoiceItems(TrackPrefHelper.SUB_SDH_MODES, TrackPrefHelper.getSdhMode(this), (d2, m) -> {
+                                    TrackPrefHelper.setSdhMode(this, m);
+                                    TrackPrefHelper.applyToPlayer(this, player);
+                                    d2.dismiss();
+                                    showDefaultLanguagesDialog();
+                                }).show();
+                    } else {
+                        int cur = which == 0 ? TrackPrefHelper.getAudio1(this)
+                                : which == 1 ? TrackPrefHelper.getAudio2(this)
+                                : which == 2 ? TrackPrefHelper.getSub1(this)
+                                : TrackPrefHelper.getSub2(this);
+                        new android.app.AlertDialog.Builder(this)
+                                .setTitle(items[which].split(":")[0])
+                                .setSingleChoiceItems(TrackPrefHelper.LANG_LABELS, cur, (d2, idx) -> {
+                                    if (which == 0) TrackPrefHelper.setAudio1(this, idx);
+                                    else if (which == 1) TrackPrefHelper.setAudio2(this, idx);
+                                    else if (which == 2) TrackPrefHelper.setSub1(this, idx);
+                                    else TrackPrefHelper.setSub2(this, idx);
+                                    TrackPrefHelper.applyToPlayer(this, player);
+                                    d2.dismiss();
+                                    showDefaultLanguagesDialog();
+                                }).show();
+                    }
+                })
+                .setPositiveButton("Done", null)
+                .show();
+    }
+    
     private void showSecondaryLangDialog() {
         int current = SubtitleOnlineHelper.getSecondaryLangIndex(this);
         new android.app.AlertDialog.Builder(this)
