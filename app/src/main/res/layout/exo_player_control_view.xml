@@ -16,7 +16,16 @@
       android:layout_gravity="bottom"
       android:background="@color/exo_bottom_bar_background"
       android:layoutDirection="ltr">
+      
+    <LinearLayout android:gravity="center_vertical" android:id="@+id/bottom_left_controls" android:layout_gravity="center_vertical|start" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:layout_width="wrap_content" android:orientation="horizontal">
 
+      <ImageButton android:background="@drawable/tv_item_bg" android:focusable="true" android:id="@+id/btn_bl_prev" android:layout_height="36dp" android:layout_width="36dp" android:src="@android:drawable/ic_media_previous"/>
+
+      <ImageButton android:background="@drawable/tv_item_bg" android:focusable="true" android:id="@+id/btn_bl_play_pause" android:layout_height="40dp" android:layout_marginEnd="4dp" android:layout_marginStart="4dp" android:layout_width="40dp" android:src="@android:drawable/ic_media_pause"/>
+
+      <ImageButton android:background="@drawable/tv_item_bg" android:focusable="true" android:id="@+id/btn_bl_next" android:layout_height="36dp" android:layout_width="36dp" android:src="@android:drawable/ic_media_next"/>
+    </LinearLayout>
+      
     <LinearLayout android:id="@+id/exo_time"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -25,6 +34,7 @@
         android:paddingLeft="@dimen/exo_styled_bottom_bar_time_padding"
         android:paddingRight="@dimen/exo_styled_bottom_bar_time_padding"
         android:layout_gravity="center_vertical|start"
+        android:layout_marginStart="136dp"
         android:layoutDirection="ltr">
 
       <TextView android:id="@+id/exo_position"
