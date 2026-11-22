@@ -1353,7 +1353,7 @@ public class PlayerActivity extends Activity {
                 playerBuilder.setMediaSourceFactory(
                         new DefaultMediaSourceFactory(new FtpDataSource.Factory(), extractorsFactory)
                                 .setSubtitleParserFactory(subtitleParserFactory));
-            } else if ("smb".equals(scheme)) {
+            } else if ("smb".equals(scheme) || "smb1".equals(scheme)) {
                 playerBuilder.setMediaSourceFactory(
                         new DefaultMediaSourceFactory(new SmbDataSource.Factory(), extractorsFactory)
                                 .setSubtitleParserFactory(subtitleParserFactory));
@@ -1442,7 +1442,23 @@ public class PlayerActivity extends Activity {
                 MediaItem.SubtitleConfiguration subtitle = SubtitleUtils.buildSubtitle(this, mPrefs.subtitleUri, null, true);
                 mediaItemBuilder.setSubtitleConfigurations(Collections.singletonList(subtitle));
             }
-            player.setMediaItem(mediaItemBuilder.build(), mPrefs.getPosition());
+            ArrayList<String> playlistUrls = getIntent() != null ? getIntent().getStringArrayListExtra("playlist_urls") : null;
+            ArrayList<String> playlistTitles = getIntent() != null ? getIntent().getStringArrayListExtra("playlist_titles") : null;
+            int playlistIndex = getIntent() != null ? getIntent().getIntExtra("playlist_index", 0) : 0;
+
+            if (playlistUrls != null && playlistUrls.size() > 1) {
+                List<MediaItem> playlistItems = new ArrayList<>();
+                for (int i = 0; i < playlistUrls.size(); i++) {
+                    String t = (playlistTitles != null && i < playlistTitles.size()) ? playlistTitles.get(i) : "";
+                    playlistItems.add(new MediaItem.Builder()
+                            .setUri(Uri.parse(playlistUrls.get(i)))
+                            .setMediaMetadata(new MediaMetadata.Builder().setTitle(t).build())
+                            .build());
+                }
+                player.setMediaItems(playlistItems, playlistIndex, C.TIME_UNSET);
+            } else {
+                player.setMediaItem(mediaItemBuilder.build(), mPrefs.getPosition());
+            }
 
             try {
                 if (loudnessEnhancer != null) {
