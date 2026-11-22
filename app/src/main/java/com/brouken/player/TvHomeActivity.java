@@ -172,7 +172,7 @@ public class TvHomeActivity extends Activity {
                 .setPositiveButton("Play", (d, w) -> {
                     String url = input.getText().toString().trim();
                     if (!url.isEmpty()) {
-                        launchPlayer(url, url);
+                        launchPlayer(url, url, null, null, 0);
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -220,11 +220,16 @@ public class TvHomeActivity extends Activity {
                 .show();
     }
 
-    private void launchPlayer(String url, String title) {
+    private void launchPlayer(String url, String title, ArrayList<String> urls, ArrayList<String> titles, int index) {
         Intent intent = new Intent(this, PlayerActivity.class);
         intent.setAction(Intent.ACTION_VIEW);
         intent.setData(Uri.parse(url));
         intent.putExtra(PlayerActivity.API_TITLE, title);
+        if (urls != null && urls.size() > 1) {
+            intent.putStringArrayListExtra("playlist_urls", urls);
+            intent.putStringArrayListExtra("playlist_titles", titles);
+            intent.putExtra("playlist_index", index);
+        }
         startActivity(intent);
     }
 
@@ -311,7 +316,17 @@ public class TvHomeActivity extends Activity {
                         break;
                     case NetworkBrowser.TYPE_MEDIA:
                         if (item.path != null) {
-                            launchPlayer(item.path, item.title);
+                            ArrayList<String> urls = new ArrayList<>();
+                            ArrayList<String> titles = new ArrayList<>();
+                            int startIndex = 0;
+                            for (NetworkBrowser.NetItem n : items) {
+                                if (n.type == NetworkBrowser.TYPE_MEDIA && n.path != null) {
+                                    if (n == item) startIndex = urls.size();
+                                    urls.add(n.path);
+                                    titles.add(n.title);
+                                }
+                            }
+                            launchPlayer(item.path, item.title, urls, titles, startIndex);
                         }
                         break;
                 }
