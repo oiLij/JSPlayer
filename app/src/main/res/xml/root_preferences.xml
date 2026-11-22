@@ -98,4 +98,10 @@
 
     </PreferenceCategory>
 
+    <SwitchPreferenceCompat
+        android:defaultValue="true"
+        android:key="controls_bottom_left"
+        android:summary="Move Prev / Play-Pause / Next to bottom-left (off = center)"
+        android:title="Bottom-Left Playback Controls" />
+    
 </PreferenceScreen>
