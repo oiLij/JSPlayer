@@ -28,6 +28,11 @@ public class SmbDataSource extends BaseDataSource {
         }
     }
 
+    private static final int BUFFER_SIZE = 131072; // 128 KB read-ahead buffer
+    private final byte[] internalBuf = new byte[BUFFER_SIZE];
+    private int bufPos = 0;
+    private int bufLimit = 0;
+
     private SmbRandomAccess raf;
     private SmbFile smbFile;
     private Uri uri;
@@ -41,6 +46,8 @@ public class SmbDataSource extends BaseDataSource {
     @Override
     public long open(DataSpec dataSpec) throws IOException {
         this.uri = dataSpec.uri;
+        this.bufPos = 0;
+        this.bufLimit = 0;
         transferInitializing(dataSpec);
 
         String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "smb";
@@ -57,8 +64,9 @@ public class SmbDataSource extends BaseDataSource {
             props.setProperty("jcifs.smb.client.minVersion", "SMB202");
             props.setProperty("jcifs.smb.client.maxVersion", "SMB311");
         }
-        props.setProperty("jcifs.smb.client.responseTimeout", "10000");
-        props.setProperty("jcifs.smb.client.connTimeout", "8000");
+        props.setProperty("jcifs.smb.client.soTimeout", "15000");
+        props.setProperty("jcifs.smb.client.responseTimeout", "15000");
+        props.setProperty("jcifs.smb.client.connTimeout", "10000");
 
         CIFSContext base = new BaseContext(new PropertyConfiguration(props));
         String userInfo = uri.getUserInfo();
@@ -76,7 +84,7 @@ public class SmbDataSource extends BaseDataSource {
         try {
             smbFile = new SmbFile(cleanUrl, ctx);
             long fileLength = smbFile.length();
-            raf = smbFile.openRandomAccess("r");
+            raf = smbFile.openRandomAccess("r", SmbFile.FILE_SHARE_READ);
             if (dataSpec.position > 0) {
                 raf.seek(dataSpec.position);
             }
@@ -99,16 +107,28 @@ public class SmbDataSource extends BaseDataSource {
         if (length == 0) return 0;
         if (bytesRemaining == 0) return C.RESULT_END_OF_INPUT;
 
-        int toRead = bytesRemaining == C.LENGTH_UNSET ? length : (int) Math.min(bytesRemaining, length);
-        int read = raf.read(buffer, offset, toRead);
-        if (read == -1) {
-            return C.RESULT_END_OF_INPUT;
+        if (bufPos >= bufLimit) {
+            int toFetch = bytesRemaining == C.LENGTH_UNSET ? BUFFER_SIZE : (int) Math.min(bytesRemaining, BUFFER_SIZE);
+            int fetched = raf.read(internalBuf, 0, toFetch);
+            if (fetched <= 0) {
+                return C.RESULT_END_OF_INPUT;
+            }
+            bufPos = 0;
+            bufLimit = fetched;
         }
+
+        int available = bufLimit - bufPos;
+        int toCopy = Math.min(length, available);
         if (bytesRemaining != C.LENGTH_UNSET) {
-            bytesRemaining -= read;
+            toCopy = (int) Math.min(toCopy, bytesRemaining);
         }
-        bytesTransferred(read);
-        return read;
+        System.arraycopy(internalBuf, bufPos, buffer, offset, toCopy);
+        bufPos += toCopy;
+        if (bytesRemaining != C.LENGTH_UNSET) {
+            bytesRemaining -= toCopy;
+        }
+        bytesTransferred(toCopy);
+        return toCopy;
     }
 
     @Nullable
@@ -120,6 +140,8 @@ public class SmbDataSource extends BaseDataSource {
     @Override
     public void close() {
         uri = null;
+        bufPos = 0;
+        bufLimit = 0;
         try { if (raf != null) raf.close(); } catch (Exception ignored) {}
         try { if (smbFile != null) smbFile.close(); } catch (Exception ignored) {}
         raf = null;
