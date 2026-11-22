@@ -11,6 +11,7 @@ import androidx.media3.datasource.DataSpec;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 
 import jcifs.CIFSContext;
 import jcifs.SmbRandomAccess;
@@ -28,7 +29,8 @@ public class SmbDataSource extends BaseDataSource {
         }
     }
 
-    private static final int BUFFER_SIZE = 131072; // 128 KB read-ahead buffer
+    private static final ConcurrentHashMap<String, CIFSContext> CONTEXT_CACHE = new ConcurrentHashMap<>();
+    private static final int BUFFER_SIZE = 262144; // 256 KB read-ahead buffer
     private final byte[] internalBuf = new byte[BUFFER_SIZE];
     private int bufPos = 0;
     private int bufLimit = 0;
@@ -41,6 +43,37 @@ public class SmbDataSource extends BaseDataSource {
 
     public SmbDataSource() {
         super(/* isNetwork= */ true);
+    }
+
+    private static CIFSContext getOrCreateContext(String scheme, String host, String userInfo) throws IOException {
+        String key = scheme + "|" + host + "|" + (userInfo != null ? userInfo : "");
+        CIFSContext cached = CONTEXT_CACHE.get(key);
+        if (cached != null) return cached;
+
+        Properties props = new Properties();
+        if ("smb1".equals(scheme)) {
+            props.setProperty("jcifs.smb.client.minVersion", "SMB1");
+            props.setProperty("jcifs.smb.client.maxVersion", "SMB1");
+        } else {
+            props.setProperty("jcifs.smb.client.minVersion", "SMB202");
+            props.setProperty("jcifs.smb.client.maxVersion", "SMB311");
+        }
+        props.setProperty("jcifs.smb.client.soTimeout", "15000");
+        props.setProperty("jcifs.smb.client.responseTimeout", "15000");
+        props.setProperty("jcifs.smb.client.connTimeout", "10000");
+
+        CIFSContext base = new BaseContext(new PropertyConfiguration(props));
+        CIFSContext ctx;
+        if (userInfo != null && !userInfo.isEmpty()) {
+            int colon = userInfo.indexOf(':');
+            String user = colon >= 0 ? URLDecoder.decode(userInfo.substring(0, colon), "UTF-8") : URLDecoder.decode(userInfo, "UTF-8");
+            String pass = colon >= 0 ? URLDecoder.decode(userInfo.substring(colon + 1), "UTF-8") : "";
+            ctx = base.withCredentials(new NtlmPasswordAuthenticator(null, user, pass));
+        } else {
+            ctx = base.withAnonymousCredentials();
+        }
+        CONTEXT_CACHE.put(key, ctx);
+        return ctx;
     }
 
     @Override
@@ -56,31 +89,9 @@ public class SmbDataSource extends BaseDataSource {
         String decodedPath = uri.getPath();
         if (decodedPath == null || decodedPath.isEmpty()) decodedPath = "/";
 
-        Properties props = new Properties();
-        if ("smb1".equals(scheme)) {
-            props.setProperty("jcifs.smb.client.minVersion", "SMB1");
-            props.setProperty("jcifs.smb.client.maxVersion", "SMB1");
-        } else {
-            props.setProperty("jcifs.smb.client.minVersion", "SMB202");
-            props.setProperty("jcifs.smb.client.maxVersion", "SMB311");
-        }
-        props.setProperty("jcifs.smb.client.soTimeout", "15000");
-        props.setProperty("jcifs.smb.client.responseTimeout", "15000");
-        props.setProperty("jcifs.smb.client.connTimeout", "10000");
-
-        CIFSContext base = new BaseContext(new PropertyConfiguration(props));
-        String userInfo = uri.getUserInfo();
-        CIFSContext ctx;
-        if (userInfo != null && !userInfo.isEmpty()) {
-            int colon = userInfo.indexOf(':');
-            String user = colon >= 0 ? URLDecoder.decode(userInfo.substring(0, colon), "UTF-8") : URLDecoder.decode(userInfo, "UTF-8");
-            String pass = colon >= 0 ? URLDecoder.decode(userInfo.substring(colon + 1), "UTF-8") : "";
-            ctx = base.withCredentials(new NtlmPasswordAuthenticator(null, user, pass));
-        } else {
-            ctx = base.withAnonymousCredentials();
-        }
-
+        CIFSContext ctx = getOrCreateContext(scheme, host, uri.getUserInfo());
         String cleanUrl = "smb://" + host + (port > 0 && port != 445 ? ":" + port : "") + decodedPath;
+
         try {
             smbFile = new SmbFile(cleanUrl, ctx);
             long fileLength = smbFile.length();
