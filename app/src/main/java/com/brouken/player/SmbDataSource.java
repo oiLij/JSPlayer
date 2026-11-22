@@ -13,11 +13,12 @@ import java.net.URLDecoder;
 import java.util.Properties;
 
 import jcifs.CIFSContext;
+import jcifs.SmbResource;
 import jcifs.config.PropertyConfiguration;
 import jcifs.context.BaseContext;
 import jcifs.smb.NtlmPasswordAuthenticator;
 import jcifs.smb.SmbFile;
-import jcifs.smb.SmbRandomAccessFile;
+import jcifs.smb.SmbRandomAccess;
 
 public class SmbDataSource extends BaseDataSource {
 
@@ -28,7 +29,8 @@ public class SmbDataSource extends BaseDataSource {
         }
     }
 
-    private SmbRandomAccessFile raf;
+    private SmbRandomAccess raf;
+    private SmbFile smbFile;
     private Uri uri;
     private long bytesRemaining;
     private boolean opened;
@@ -45,8 +47,8 @@ public class SmbDataSource extends BaseDataSource {
         String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "smb";
         String host = uri.getHost();
         int port = uri.getPort();
-        String path = uri.getPath();
-        if (path == null) path = "/";
+        String encodedPath = uri.getEncodedPath();
+        if (encodedPath == null || encodedPath.isEmpty()) encodedPath = "/";
 
         Properties props = new Properties();
         if ("smb1".equals(scheme)) {
@@ -57,6 +59,7 @@ public class SmbDataSource extends BaseDataSource {
             props.setProperty("jcifs.smb.client.maxVersion", "SMB311");
         }
         props.setProperty("jcifs.smb.client.responseTimeout", "10000");
+        props.setProperty("jcifs.smb.client.connTimeout", "8000");
 
         CIFSContext base = new BaseContext(new PropertyConfiguration(props));
         String userInfo = uri.getUserInfo();
@@ -70,11 +73,11 @@ public class SmbDataSource extends BaseDataSource {
             ctx = base.withAnonymousCredentials();
         }
 
-        String cleanUrl = "smb://" + host + (port > 0 && port != 445 ? ":" + port : "") + path;
-        SmbFile smbFile = new SmbFile(cleanUrl, ctx);
+        String cleanUrl = "smb://" + host + (port > 0 && port != 445 ? ":" + port : "") + encodedPath;
+        smbFile = new SmbFile(cleanUrl, ctx);
         long fileLength = smbFile.length();
 
-        raf = new SmbRandomAccessFile(smbFile, "r");
+        raf = smbFile.openRandomAccess("r");
         if (dataSpec.position > 0) {
             raf.seek(dataSpec.position);
         }
@@ -116,17 +119,13 @@ public class SmbDataSource extends BaseDataSource {
     @Override
     public void close() {
         uri = null;
-        try {
-            if (raf != null) {
-                raf.close();
-            }
-        } catch (Exception ignored) {
-        } finally {
-            raf = null;
-            if (opened) {
-                opened = false;
-                transferEnded();
-            }
+        try { if (raf != null) raf.close(); } catch (Exception ignored) {}
+        try { if (smbFile != null) smbFile.close(); } catch (Exception ignored) {}
+        raf = null;
+        smbFile = null;
+        if (opened) {
+            opened = false;
+            transferEnded();
         }
     }
 }
