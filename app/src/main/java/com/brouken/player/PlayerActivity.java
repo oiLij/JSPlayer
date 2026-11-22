@@ -2733,7 +2733,14 @@ public class PlayerActivity extends Activity {
     }
 
     private void showSubtitleSourceDialog() {
-        String[] options = {"Load Subtitle from File", "Search Online (SubDL)", "Set SubDL API Key"};
+        String secLang = SubtitleOnlineHelper.getSecondaryLangName(this);
+        String[] options = {
+                "Load Subtitle from File",
+                "Search Online - OpenSubtitles (No API Key)",
+                "Search Online - SubDL (Needs API key - add manually)",
+                "Secondary Language: " + secLang,
+                "Set SubDL API Key"
+        };
         new android.app.AlertDialog.Builder(this)
                 .setTitle("Add Subtitles")
                 .setItems(options, (d, which) -> {
@@ -2743,11 +2750,28 @@ public class PlayerActivity extends Activity {
                         intent.setType("*/*");
                         startActivityForResult(intent, 9912);
                     } else if (which == 1) {
-                        showOnlineSubSearchDialog();
+                        showOnlineSubSearchDialog(false);
+                    } else if (which == 2) {
+                        showOnlineSubSearchDialog(true);
+                    } else if (which == 3) {
+                        showSecondaryLangDialog();
                     } else {
                         showSubdlKeyDialog();
                     }
                 })
+                .show();
+    }
+
+    private void showSecondaryLangDialog() {
+        int current = SubtitleOnlineHelper.getSecondaryLangIndex(this);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Secondary Subtitle Language (Default: English)")
+                .setSingleChoiceItems(SubtitleOnlineHelper.LANG_NAMES, current, (d, which) -> {
+                    SubtitleOnlineHelper.saveSecondaryLangIndex(this, which);
+                    android.widget.Toast.makeText(this, "Secondary: " + SubtitleOnlineHelper.LANG_NAMES[which], android.widget.Toast.LENGTH_SHORT).show();
+                    d.dismiss();
+                })
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 
@@ -2763,9 +2787,10 @@ public class PlayerActivity extends Activity {
                 .show();
     }
 
-    private void showOnlineSubSearchDialog() {
+    private void showOnlineSubSearchDialog(boolean useSubdl) {
         String apiKey = SubtitleOnlineHelper.getApiKey(this);
-        if (apiKey.isEmpty()) {
+        if (useSubdl && apiKey.isEmpty()) {
+            android.widget.Toast.makeText(this, "SubDL needs an API key. Add it manually first.", android.widget.Toast.LENGTH_LONG).show();
             showSubdlKeyDialog();
             return;
         }
@@ -2773,14 +2798,17 @@ public class PlayerActivity extends Activity {
         String defaultTitle = getIntent() != null ? getIntent().getStringExtra(API_TITLE) : "";
         et.setText(SubtitleOnlineHelper.cleanQuery(defaultTitle));
         et.setHint("Movie or Series Name");
+
+        String provider = useSubdl ? "SubDL" : "OpenSubtitles";
         new android.app.AlertDialog.Builder(this)
-                .setTitle("Search Online Subtitles (EN, TA)")
+                .setTitle("Search " + provider)
                 .setView(et)
                 .setPositiveButton("Search", (d, w) -> {
                     String q = et.getText().toString().trim();
                     if (q.isEmpty()) return;
-                    android.widget.Toast.makeText(this, "Searching SubDL...", android.widget.Toast.LENGTH_SHORT).show();
-                    SubtitleOnlineHelper.search(apiKey, q, "EN,TA", (results, err) -> {
+                    android.widget.Toast.makeText(this, "Searching " + provider + "...", android.widget.Toast.LENGTH_SHORT).show();
+
+                    SubtitleOnlineHelper.SearchCallback cb = (results, err) -> {
                         if (err != null || results.isEmpty()) {
                             android.widget.Toast.makeText(this, err != null ? "Error: " + err : "No subtitles found", android.widget.Toast.LENGTH_LONG).show();
                             return;
@@ -2788,10 +2816,10 @@ public class PlayerActivity extends Activity {
                         String[] items = new String[results.size()];
                         for (int i = 0; i < results.size(); i++) items[i] = results.get(i).title;
                         new android.app.AlertDialog.Builder(this)
-                                .setTitle("Select Subtitle")
+                                .setTitle("Select Subtitle (" + provider + ")")
                                 .setItems(items, (d2, idx) -> {
                                     android.widget.Toast.makeText(this, "Downloading...", android.widget.Toast.LENGTH_SHORT).show();
-                                    SubtitleOnlineHelper.downloadAndExtract(this, results.get(idx).downloadUrl, (file, dlErr) -> {
+                                    SubtitleOnlineHelper.downloadAndExtract(this, results.get(idx), (file, dlErr) -> {
                                         if (dlErr != null || file == null) {
                                             android.widget.Toast.makeText(this, "Download failed: " + dlErr, android.widget.Toast.LENGTH_LONG).show();
                                         } else {
@@ -2800,7 +2828,13 @@ public class PlayerActivity extends Activity {
                                     });
                                 })
                                 .show();
-                    });
+                    };
+
+                    if (useSubdl) {
+                        SubtitleOnlineHelper.searchSubdl(this, apiKey, q, cb);
+                    } else {
+                        SubtitleOnlineHelper.searchOpenSubtitles(this, q, cb);
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
