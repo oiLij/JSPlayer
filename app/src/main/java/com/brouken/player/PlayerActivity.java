@@ -354,6 +354,8 @@ public class PlayerActivity extends Activity {
         coordinatorLayout = findViewById(R.id.coordinatorLayout);
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         playerView = findViewById(R.id.video_view);
+        playerView.setShowPreviousButton(true);
+        playerView.setShowNextButton(true);
         exoPlayPause = findViewById(R.id.exo_play_pause);
         loadingProgressBar = findViewById(R.id.loading);
 
@@ -840,6 +842,7 @@ public class PlayerActivity extends Activity {
     @Override
     public void onResume() {
         super.onResume();
+        applyPlaybackControlsPosition();
         restorePlayStateAllowed = true;
         if (isTvBox && Build.VERSION.SDK_INT >= 31) {
             updateSubtitleStyle(this);
@@ -2911,5 +2914,31 @@ public class PlayerActivity extends Activity {
         player.replaceMediaItem(player.getCurrentMediaItemIndex(), updated);
         player.seekTo(pos);
         android.widget.Toast.makeText(this, "Subtitle loaded", android.widget.Toast.LENGTH_SHORT).show();
+    }
+    
+    private void applyPlaybackControlsPosition() {
+        View centerControls = findViewById(androidx.media3.ui.R.id.exo_center_controls);
+        if (centerControls == null) return;
+
+        boolean bottomLeft = androidx.preference.PreferenceManager.getDefaultSharedPreferences(this)
+                .getBoolean("controls_bottom_left", true);
+
+        android.view.ViewGroup.LayoutParams rawLp = centerControls.getLayoutParams();
+        if (rawLp instanceof android.widget.FrameLayout.LayoutParams) {
+            android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) rawLp;
+            float density = getResources().getDisplayMetrics().density;
+            if (bottomLeft) {
+                lp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
+                lp.setMargins((int) (20 * density), 0, 0, (int) (72 * density));
+                centerControls.setScaleX(0.85f);
+                centerControls.setScaleY(0.85f);
+            } else {
+                lp.gravity = android.view.Gravity.CENTER;
+                lp.setMargins(0, 0, 0, 0);
+                centerControls.setScaleX(1.0f);
+                centerControls.setScaleY(1.0f);
+            }
+            centerControls.setLayoutParams(lp);
+        }
     }
 }
