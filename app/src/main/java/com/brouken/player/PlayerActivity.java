@@ -1729,16 +1729,6 @@ public class PlayerActivity extends Activity {
 
     private class PlayerListener implements Player.Listener {
         @Override
-        public void onIsPlayingChanged(boolean isPlaying) {
-            android.widget.ImageButton btnPlayPause = findViewById(R.id.btn_bl_play_pause);
-            if (btnPlayPause != null) {
-                btnPlayPause.setImageResource(isPlaying
-                        ? android.R.drawable.ic_media_pause
-                        : android.R.drawable.ic_media_play);
-            }
-        }
-
-        @Override
         public void onMediaItemTransition(@androidx.annotation.Nullable androidx.media3.common.MediaItem mediaItem, int reason) {
             if (mediaItem != null) {
                 sdhAppliedForCurrentItem = false;
@@ -1789,6 +1779,13 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
+            android.widget.ImageButton btnPlayPause = findViewById(R.id.btn_bl_play_pause);
+            if (btnPlayPause != null) {
+                btnPlayPause.setImageResource(isPlaying
+                        ? android.R.drawable.ic_media_pause
+                        : android.R.drawable.ic_media_play);
+            }
+            
             playerView.setKeepScreenOn(isPlaying);
 
             if (Utils.isPiPSupported(PlayerActivity.this)) {
