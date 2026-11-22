@@ -13,12 +13,11 @@ import java.net.URLDecoder;
 import java.util.Properties;
 
 import jcifs.CIFSContext;
-import jcifs.SmbResource;
+import jcifs.SmbRandomAccess;
 import jcifs.config.PropertyConfiguration;
 import jcifs.context.BaseContext;
 import jcifs.smb.NtlmPasswordAuthenticator;
 import jcifs.smb.SmbFile;
-import jcifs.SmbRandomAccess;
 
 public class SmbDataSource extends BaseDataSource {
 
@@ -47,8 +46,8 @@ public class SmbDataSource extends BaseDataSource {
         String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "smb";
         String host = uri.getHost();
         int port = uri.getPort();
-        String encodedPath = uri.getEncodedPath();
-        if (encodedPath == null || encodedPath.isEmpty()) encodedPath = "/";
+        String decodedPath = uri.getPath();
+        if (decodedPath == null || decodedPath.isEmpty()) decodedPath = "/";
 
         Properties props = new Properties();
         if ("smb1".equals(scheme)) {
@@ -73,19 +72,21 @@ public class SmbDataSource extends BaseDataSource {
             ctx = base.withAnonymousCredentials();
         }
 
-        String cleanUrl = "smb://" + host + (port > 0 && port != 445 ? ":" + port : "") + encodedPath;
-        smbFile = new SmbFile(cleanUrl, ctx);
-        long fileLength = smbFile.length();
-
-        raf = smbFile.openRandomAccess("r");
-        if (dataSpec.position > 0) {
-            raf.seek(dataSpec.position);
-        }
-
-        if (dataSpec.length != C.LENGTH_UNSET) {
-            bytesRemaining = dataSpec.length;
-        } else {
-            bytesRemaining = Math.max(0, fileLength - dataSpec.position);
+        String cleanUrl = "smb://" + host + (port > 0 && port != 445 ? ":" + port : "") + decodedPath;
+        try {
+            smbFile = new SmbFile(cleanUrl, ctx);
+            long fileLength = smbFile.length();
+            raf = smbFile.openRandomAccess("r");
+            if (dataSpec.position > 0) {
+                raf.seek(dataSpec.position);
+            }
+            if (dataSpec.length != C.LENGTH_UNSET) {
+                bytesRemaining = dataSpec.length;
+            } else {
+                bytesRemaining = Math.max(0, fileLength - dataSpec.position);
+            }
+        } catch (Exception e) {
+            throw new IOException("SMB Error (" + cleanUrl + "): " + e.getMessage(), e);
         }
 
         opened = true;
