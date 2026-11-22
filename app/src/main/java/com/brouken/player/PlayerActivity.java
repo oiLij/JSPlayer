@@ -865,6 +865,15 @@ public class PlayerActivity extends Activity {
             playerView.removeCallbacks(barsHider);
         }
         playerView.setCustomErrorMessage(null);
+        if (player != null && mPrefs != null && mPrefs.mediaUri != null
+                && isAudioUri(mPrefs.mediaUri) && player.isPlaying()) {
+            skipHandler.removeCallbacks(chapterMonitorRunnable);
+            skipHandler.removeCallbacks(hideSkipRunnable);
+            if (playerView != null) {
+                playerView.setPlayer(null);
+            }
+            return;
+        }
         releasePlayer(false);
     }
 
@@ -1292,6 +1301,14 @@ public class PlayerActivity extends Activity {
     public void initializePlayer() {
 
         if (player != null) {
+            // If returning to the exact same playing audio track, just re-attach the view without restarting
+            if (mPrefs != null && mPrefs.mediaUri != null && isAudioUri(mPrefs.mediaUri)
+                    && player.getCurrentMediaItem() != null
+                    && mPrefs.mediaUri.equals(player.getCurrentMediaItem().localConfiguration != null
+                        ? player.getCurrentMediaItem().localConfiguration.uri : null)) {
+                playerView.setPlayer(player);
+                return;
+            }
             stopBackgroundAudio();
         }
         
