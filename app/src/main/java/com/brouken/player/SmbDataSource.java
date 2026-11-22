@@ -18,7 +18,7 @@ import jcifs.config.PropertyConfiguration;
 import jcifs.context.BaseContext;
 import jcifs.smb.NtlmPasswordAuthenticator;
 import jcifs.smb.SmbFile;
-import jcifs.smb.SmbRandomAccess;
+import jcifs.SmbRandomAccess;
 
 public class SmbDataSource extends BaseDataSource {
 
