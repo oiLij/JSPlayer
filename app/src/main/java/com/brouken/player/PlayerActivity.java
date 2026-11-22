@@ -124,6 +124,21 @@ import java.util.concurrent.TimeUnit;
 
 public class PlayerActivity extends Activity {
 
+    private List<ChapterHelper.ChapterItem> activeChapters = new ArrayList<>();
+    private android.widget.Button btnSkipChapter;
+    private int lastShownSkipChapterIndex = -1;
+    private final android.os.Handler skipHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable hideSkipRunnable = () -> {
+        if (btnSkipChapter != null) btnSkipChapter.setVisibility(View.GONE);
+    };
+    private final Runnable chapterMonitorRunnable = new Runnable() {
+        @Override
+        public void run() {
+            checkChapterSkip();
+            skipHandler.postDelayed(this, 1000);
+        }
+    };
+    
     private PlayerListener playerListener;
     private BroadcastReceiver mReceiver;
     private AudioManager mAudioManager;
@@ -661,6 +676,41 @@ public class PlayerActivity extends Activity {
         buttonSync.setClickable(true);
         buttonSync.setText("Sync");
         buttonSync.setOnClickListener(view -> showAudioDelayDialog());
+
+        TextView buttonSubExtra = new TextView(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonSubExtra.setId(View.generateViewId());
+        buttonSubExtra.setGravity(Gravity.CENTER);
+        buttonSubExtra.setTextColor(Color.WHITE);
+        buttonSubExtra.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        buttonSubExtra.setTypeface(Typeface.DEFAULT_BOLD);
+        buttonSubExtra.setFocusable(true);
+        buttonSubExtra.setClickable(true);
+        buttonSubExtra.setText("Sub+");
+        buttonSubExtra.setOnClickListener(v -> showSubtitleSourceDialog());
+
+        TextView buttonChapters = new TextView(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonChapters.setId(View.generateViewId());
+        buttonChapters.setGravity(Gravity.CENTER);
+        buttonChapters.setTextColor(Color.WHITE);
+        buttonChapters.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        buttonChapters.setTypeface(Typeface.DEFAULT_BOLD);
+        buttonChapters.setFocusable(true);
+        buttonChapters.setClickable(true);
+        buttonChapters.setText("Ch");
+        buttonChapters.setOnClickListener(v -> showChaptersDialog());
+
+        btnSkipChapter = new android.widget.Button(this);
+        btnSkipChapter.setVisibility(View.GONE);
+        btnSkipChapter.setTextColor(android.graphics.Color.WHITE);
+        btnSkipChapter.setBackgroundColor(android.graphics.Color.parseColor("#CC1E88E5"));
+        btnSkipChapter.setPadding(32, 18, 32, 18);
+        btnSkipChapter.setFocusable(true);
+        android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.BOTTOM | android.view.Gravity.END);
+        lp.setMargins(0, 0, 48, 150);
+        addContentView(btnSkipChapter, lp);
         
         final HorizontalScrollView horizontalScrollView = (HorizontalScrollView) getLayoutInflater().inflate(R.layout.controls, null);
         final LinearLayout controls = horizontalScrollView.findViewById(R.id.controls);
@@ -669,6 +719,8 @@ public class PlayerActivity extends Activity {
         controls.addView(exoSubtitle);
         controls.addView(buttonPassthrough);
         controls.addView(buttonSync);
+        controls.addView(buttonSubExtra);
+        controls.addView(buttonChapters);
         controls.addView(buttonAspectRatio);
         if (Utils.isPiPSupported(this) && buttonPiP != null) {
             controls.addView(buttonPiP);
@@ -1210,6 +1262,10 @@ public class PlayerActivity extends Activity {
             updateSubtitleStyle(this);
         } else {
             super.onActivityResult(requestCode, resultCode, data);
+            if (requestCode == 9912 && resultCode == RESULT_OK && data != null && data.getData() != null) {
+                attachExternalSubtitle(data.getData());
+                return;
+            }
         }
 
         // Init here because onStart won't follow when app was only paused when file chooser was shown
@@ -1569,6 +1625,10 @@ public class PlayerActivity extends Activity {
             savePlayer();
         }
 
+        skipHandler.removeCallbacks(chapterMonitorRunnable);
+        skipHandler.removeCallbacks(hideSkipRunnable);
+        if (btnSkipChapter != null) btnSkipChapter.setVisibility(View.GONE);
+        
         if (player != null) {
             notifyAudioSessionUpdate(false);
 
@@ -1601,6 +1661,16 @@ public class PlayerActivity extends Activity {
     }
 
     private class PlayerListener implements Player.Listener {
+        @Override
+        public void onTracksChanged(androidx.media3.common.Tracks tracks) {
+            activeChapters = ChapterHelper.extractChapters(tracks);
+            lastShownSkipChapterIndex = -1;
+            skipHandler.removeCallbacks(chapterMonitorRunnable);
+            if (!activeChapters.isEmpty()) {
+                skipHandler.post(chapterMonitorRunnable);
+            }
+        }
+        
         @Override
         public void onAudioSessionIdChanged(int audioSessionId) {
             try {
@@ -2605,5 +2675,154 @@ public class PlayerActivity extends Activity {
         long m = (totalSec % 3600) / 60;
         long s = totalSec % 60;
         return h > 0 ? String.format("%d:%02d:%02d", h, m, s) : String.format("%02d:%02d", m, s);
+    }
+
+    private void checkChapterSkip() {
+        if (player == null || !player.isPlaying() || activeChapters.isEmpty() || btnSkipChapter == null) return;
+        long pos = player.getCurrentPosition();
+        int idx = ChapterHelper.findChapterIndex(activeChapters, pos);
+        if (idx < 0 || idx == lastShownSkipChapterIndex) return;
+
+        long showMs = ChapterHelper.getSkipShowDurationMs(idx, activeChapters.size());
+        if (showMs <= 0) return;
+
+        // Only trigger within first 8 seconds of entering that chapter
+        if (pos - activeChapters.get(idx).startMs > 8000) return;
+
+        lastShownSkipChapterIndex = idx;
+        ChapterHelper.ChapterItem ch = activeChapters.get(idx);
+        boolean isLast = (idx == activeChapters.size() - 1);
+        String label = isLast && player.hasNextMediaItem() ? "Next Episode" : "Skip " + ch.title;
+
+        btnSkipChapter.setText(label);
+        btnSkipChapter.setVisibility(View.VISIBLE);
+        btnSkipChapter.requestFocus();
+        btnSkipChapter.setOnClickListener(v -> {
+            skipHandler.removeCallbacks(hideSkipRunnable);
+            btnSkipChapter.setVisibility(View.GONE);
+            if (isLast && player.hasNextMediaItem()) {
+                player.seekToNextMediaItem();
+            } else {
+                long target = ChapterHelper.getSkipTargetMs(activeChapters, idx, player.getDuration());
+                player.seekTo(target);
+            }
+        });
+
+        skipHandler.removeCallbacks(hideSkipRunnable);
+        skipHandler.postDelayed(hideSkipRunnable, showMs);
+    }
+
+    private void showChaptersDialog() {
+        if (activeChapters.isEmpty()) {
+            android.widget.Toast.makeText(this, "No chapters found in this file", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = new String[activeChapters.size()];
+        for (int i = 0; i < activeChapters.size(); i++) {
+            ChapterHelper.ChapterItem c = activeChapters.get(i);
+            labels[i] = formatTime(c.startMs) + "  -  " + c.title;
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Chapters")
+                .setItems(labels, (d, which) -> {
+                    if (player != null) {
+                        player.seekTo(activeChapters.get(which).startMs);
+                    }
+                })
+                .show();
+    }
+
+    private void showSubtitleSourceDialog() {
+        String[] options = {"Load Subtitle from File", "Search Online (SubDL)", "Set SubDL API Key"};
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Add Subtitles")
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType("*/*");
+                        startActivityForResult(intent, 9912);
+                    } else if (which == 1) {
+                        showOnlineSubSearchDialog();
+                    } else {
+                        showSubdlKeyDialog();
+                    }
+                })
+                .show();
+    }
+
+    private void showSubdlKeyDialog() {
+        android.widget.EditText et = new android.widget.EditText(this);
+        et.setHint("Paste SubDL API Key");
+        et.setText(SubtitleOnlineHelper.getApiKey(this));
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("SubDL API Key (subdl.com/panel/api)")
+                .setView(et)
+                .setPositiveButton("Save", (d, w) -> SubtitleOnlineHelper.saveApiKey(this, et.getText().toString()))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showOnlineSubSearchDialog() {
+        String apiKey = SubtitleOnlineHelper.getApiKey(this);
+        if (apiKey.isEmpty()) {
+            showSubdlKeyDialog();
+            return;
+        }
+        android.widget.EditText et = new android.widget.EditText(this);
+        String defaultTitle = getIntent() != null ? getIntent().getStringExtra(API_TITLE) : "";
+        et.setText(SubtitleOnlineHelper.cleanQuery(defaultTitle));
+        et.setHint("Movie or Series Name");
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Search Online Subtitles (EN, TA)")
+                .setView(et)
+                .setPositiveButton("Search", (d, w) -> {
+                    String q = et.getText().toString().trim();
+                    if (q.isEmpty()) return;
+                    android.widget.Toast.makeText(this, "Searching SubDL...", android.widget.Toast.LENGTH_SHORT).show();
+                    SubtitleOnlineHelper.search(apiKey, q, "EN,TA", (results, err) -> {
+                        if (err != null || results.isEmpty()) {
+                            android.widget.Toast.makeText(this, err != null ? "Error: " + err : "No subtitles found", android.widget.Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        String[] items = new String[results.size()];
+                        for (int i = 0; i < results.size(); i++) items[i] = results.get(i).title;
+                        new android.app.AlertDialog.Builder(this)
+                                .setTitle("Select Subtitle")
+                                .setItems(items, (d2, idx) -> {
+                                    android.widget.Toast.makeText(this, "Downloading...", android.widget.Toast.LENGTH_SHORT).show();
+                                    SubtitleOnlineHelper.downloadAndExtract(this, results.get(idx).downloadUrl, (file, dlErr) -> {
+                                        if (dlErr != null || file == null) {
+                                            android.widget.Toast.makeText(this, "Download failed: " + dlErr, android.widget.Toast.LENGTH_LONG).show();
+                                        } else {
+                                            attachExternalSubtitle(Uri.fromFile(file));
+                                        }
+                                    });
+                                })
+                                .show();
+                    });
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void attachExternalSubtitle(Uri subUri) {
+        if (player == null || player.getCurrentMediaItem() == null) return;
+        long pos = player.getCurrentPosition();
+        String path = subUri.toString().toLowerCase();
+        String mime = androidx.media3.common.MimeTypes.APPLICATION_SUBRIP;
+        if (path.endsWith(".ass") || path.endsWith(".ssa")) mime = androidx.media3.common.MimeTypes.TEXT_SSA;
+        else if (path.endsWith(".vtt")) mime = androidx.media3.common.MimeTypes.TEXT_VTT;
+
+        MediaItem.SubtitleConfiguration subConfig = new MediaItem.SubtitleConfiguration.Builder(subUri)
+                .setMimeType(mime)
+                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                .build();
+        MediaItem updated = player.getCurrentMediaItem().buildUpon()
+                .setSubtitleConfigurations(java.util.Collections.singletonList(subConfig))
+                .build();
+        player.replaceMediaItem(player.getCurrentMediaItemIndex(), updated);
+        player.seekTo(pos);
+        android.widget.Toast.makeText(this, "Subtitle loaded", android.widget.Toast.LENGTH_SHORT).show();
     }
 }
