@@ -1288,6 +1288,11 @@ public class PlayerActivity extends Activity {
     }
 
     public void initializePlayer() {
+
+        if (player != null) {
+            stopBackgroundAudio();
+        }
+        
         boolean isNetworkUri = Utils.isSupportedNetworkUri(mPrefs.mediaUri);
         haveMedia = mPrefs.mediaUri != null;
 
@@ -1624,6 +1629,17 @@ public class PlayerActivity extends Activity {
     }
 
     public void releasePlayer() {
+
+        if (player != null && mPrefs != null && mPrefs.mediaUri != null
+                && isAudioUri(mPrefs.mediaUri) && player.isPlaying()) {
+            skipHandler.removeCallbacks(chapterMonitorRunnable);
+            skipHandler.removeCallbacks(hideSkipRunnable);
+            if (playerView != null) {
+                playerView.setPlayer(null);
+            }
+            return;
+        }
+        
         releasePlayer(true);
     }
 
@@ -2939,6 +2955,16 @@ public class PlayerActivity extends Activity {
                 centerControls.setScaleY(1.0f);
             }
             centerControls.setLayoutParams(lp);
+        }
+    }
+
+    public static void stopBackgroundAudio() {
+        if (player != null) {
+            try {
+                player.stop();
+                player.release();
+            } catch (Exception ignored) {}
+            player = null;
         }
     }
 }
