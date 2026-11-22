@@ -10,9 +10,11 @@ import androidx.media3.datasource.DataSpec;
 
 import java.io.IOException;
 import java.net.URLDecoder;
+import java.util.Properties;
 
 import jcifs.CIFSContext;
-import jcifs.context.SingletonContext;
+import jcifs.config.PropertyConfiguration;
+import jcifs.context.BaseContext;
 import jcifs.smb.NtlmPasswordAuthenticator;
 import jcifs.smb.SmbFile;
 import jcifs.smb.SmbRandomAccessFile;
@@ -40,13 +42,24 @@ public class SmbDataSource extends BaseDataSource {
         this.uri = dataSpec.uri;
         transferInitializing(dataSpec);
 
+        String scheme = uri.getScheme() != null ? uri.getScheme().toLowerCase() : "smb";
         String host = uri.getHost();
         int port = uri.getPort();
         String path = uri.getPath();
         if (path == null) path = "/";
 
+        Properties props = new Properties();
+        if ("smb1".equals(scheme)) {
+            props.setProperty("jcifs.smb.client.minVersion", "SMB1");
+            props.setProperty("jcifs.smb.client.maxVersion", "SMB1");
+        } else {
+            props.setProperty("jcifs.smb.client.minVersion", "SMB202");
+            props.setProperty("jcifs.smb.client.maxVersion", "SMB311");
+        }
+        props.setProperty("jcifs.smb.client.responseTimeout", "10000");
+
+        CIFSContext base = new BaseContext(new PropertyConfiguration(props));
         String userInfo = uri.getUserInfo();
-        CIFSContext base = SingletonContext.getInstance();
         CIFSContext ctx;
         if (userInfo != null && !userInfo.isEmpty()) {
             int colon = userInfo.indexOf(':');
@@ -57,7 +70,7 @@ public class SmbDataSource extends BaseDataSource {
             ctx = base.withAnonymousCredentials();
         }
 
-        String cleanUrl = "smb://" + host + (port > 0 ? ":" + port : "") + path;
+        String cleanUrl = "smb://" + host + (port > 0 && port != 445 ? ":" + port : "") + path;
         SmbFile smbFile = new SmbFile(cleanUrl, ctx);
         long fileLength = smbFile.length();
 
