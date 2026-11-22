@@ -256,6 +256,11 @@ public class TvHomeActivity extends Activity {
         void setItems(List<NetworkBrowser.NetItem> newItems) {
             this.items = newItems;
             notifyDataSetChanged();
+            tvList.post(() -> {
+                if (activeServer != null && tvList.getChildCount() > 0) {
+                    tvList.getChildAt(0).requestFocus();
+                }
+            });
         }
 
         @NonNull
