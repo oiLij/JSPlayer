@@ -127,6 +127,7 @@ public class PlayerActivity extends Activity {
     private boolean sdhAppliedForCurrentItem = false;
     private long preSkipPositionMs = -1;
     private boolean resumeDialogShownForCurrentItem = false;
+    private boolean isResumeDialogOpen = false;
     
     private List<ChapterHelper.ChapterItem> activeChapters = new ArrayList<>();
     private android.widget.Button btnSkipChapter;
@@ -1770,6 +1771,11 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onIsPlayingChanged(boolean isPlaying) {
+            if (isPlaying && isResumeDialogOpen && player != null) {
+                player.setPlayWhenReady(false);
+                player.pause();
+                return;
+            }
             android.widget.ImageButton btnPlayPause = findViewById(R.id.btn_bl_play_pause);
             if (btnPlayPause != null) {
                 btnPlayPause.setImageResource(isPlaying
@@ -3179,6 +3185,7 @@ public class PlayerActivity extends Activity {
         if (savedPos <= 5000) return;
 
         resumeDialogShownForCurrentItem = true;
+        isResumeDialogOpen = true;
         player.setPlayWhenReady(false);
         player.pause();
 
@@ -3189,6 +3196,7 @@ public class PlayerActivity extends Activity {
                 .setTitle("Resume Playback?")
                 .setMessage("Continue from " + timeStr + "?")
                 .setPositiveButton("Resume", (d, w) -> {
+                    isResumeDialogOpen = false;
                     if (player != null) {
                         player.seekTo(savedPos);
                         player.setPlayWhenReady(true);
@@ -3196,6 +3204,7 @@ public class PlayerActivity extends Activity {
                     }
                 })
                 .setNegativeButton("Start Over", (d, w) -> {
+                    isResumeDialogOpen = false;
                     if (player != null) {
                         player.seekTo(0);
                         player.setPlayWhenReady(true);
