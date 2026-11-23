@@ -128,6 +128,7 @@ public class PlayerActivity extends Activity {
     private long preSkipPositionMs = -1;
     private boolean resumeDialogShownForCurrentItem = false;
     private boolean isResumeDialogOpen = false;
+    private android.app.AlertDialog activeResumeDialog = null;
     
     private List<ChapterHelper.ChapterItem> activeChapters = new ArrayList<>();
     private android.widget.Button btnSkipChapter;
@@ -1612,34 +1613,24 @@ public class PlayerActivity extends Activity {
         player.addListener(playerListener);
         sdhAppliedForCurrentItem = false;
         TrackPrefHelper.applyToPlayer(this, player);
+        if (hasSavedVideoResume()) {
+            isResumeDialogOpen = true;
+            player.setPlayWhenReady(false);
+        }
+        if (hasSavedVideoResume()) {
+            isResumeDialogOpen = true;
+            player.setPlayWhenReady(false);
+        }
         player.prepare();
         resumeDialogShownForCurrentItem = false;
-        if (haveMedia && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
-            long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
-                    .getLong(mPrefs.mediaUri.toString(), 0);
-            if (savedPos > 5000) {
-                player.setPlayWhenReady(false);
-                new android.app.AlertDialog.Builder(this)
-                        .setTitle("Resume Video?")
-                        .setMessage("Last position: " + formatTime(savedPos))
-                        .setCancelable(false)
-                        .setPositiveButton("Resume", (d, w) -> {
-                            player.seekTo(savedPos);
-                            player.setPlayWhenReady(true);
-                        })
-                        .setNegativeButton("Start Over", (d, w) -> {
-                            player.seekTo(0);
-                            player.setPlayWhenReady(true);
-                        })
-                        .show();
-            }
-        }
 
         if (restorePlayState) {
             restorePlayState = false;
             playerView.showController();
             playerView.setControllerShowTimeoutMs(PlayerActivity.CONTROLLER_TIMEOUT);
-            player.setPlayWhenReady(true);
+            if (!isResumeDialogOpen) {
+                player.setPlayWhenReady(true);
+            }
         }
     }
 
@@ -3176,9 +3167,18 @@ public class PlayerActivity extends Activity {
         }
     }
 
-    private void checkAndShowVideoResumeDialog() {
+    private boolean hasSavedVideoResume() {
         Uri uri = getActiveMediaUri();
-        if (resumeDialogShownForCurrentItem || player == null || uri == null || isAudioUri(uri)) return;
+        if (uri == null || isAudioUri(uri)) return false;
+        long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
+                .getLong(uri.toString(), 0);
+        return savedPos > 5000;
+    }
+
+    private void checkAndShowVideoResumeDialog() {
+        if (resumeDialogShownForCurrentItem || (activeResumeDialog != null && activeResumeDialog.isShowing())) return;
+        Uri uri = getActiveMediaUri();
+        if (player == null || uri == null || isAudioUri(uri)) return;
 
         long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
                 .getLong(uri.toString(), 0);
@@ -3192,10 +3192,11 @@ public class PlayerActivity extends Activity {
         long sec = savedPos / 1000;
         String timeStr = String.format(java.util.Locale.US, "%d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60);
 
-        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+        activeResumeDialog = new android.app.AlertDialog.Builder(this)
                 .setTitle("Resume Playback?")
                 .setMessage("Continue from " + timeStr + "?")
                 .setPositiveButton("Resume", (d, w) -> {
+                    activeResumeDialog = null;
                     isResumeDialogOpen = false;
                     if (player != null) {
                         player.seekTo(savedPos);
@@ -3204,6 +3205,7 @@ public class PlayerActivity extends Activity {
                     }
                 })
                 .setNegativeButton("Start Over", (d, w) -> {
+                    activeResumeDialog = null;
                     isResumeDialogOpen = false;
                     if (player != null) {
                         player.seekTo(0);
@@ -3214,7 +3216,7 @@ public class PlayerActivity extends Activity {
                 .setCancelable(false)
                 .show();
 
-        android.widget.Button posBtn = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+        android.widget.Button posBtn = activeResumeDialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
         if (posBtn != null) posBtn.requestFocus();
     }
 }
