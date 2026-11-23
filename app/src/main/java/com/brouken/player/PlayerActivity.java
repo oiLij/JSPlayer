@@ -1809,7 +1809,7 @@ public class PlayerActivity extends Activity {
         @SuppressLint("SourceLockedOrientationActivity")
         @Override
         public void onPlaybackStateChanged(int state) {
-            if (playbackState == androidx.media3.common.Player.STATE_READY) {
+            if (State == androidx.media3.common.Player.STATE_READY) {
                 checkAndShowVideoResumeDialog();
             }
             boolean isNearEnd = false;
