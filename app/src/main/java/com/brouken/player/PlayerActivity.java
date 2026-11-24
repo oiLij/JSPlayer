@@ -128,6 +128,7 @@ public class PlayerActivity extends Activity {
     private long preSkipPositionMs = -1;
     private boolean resumeDialogShownForCurrentItem = false;
     private boolean isResumeDialogOpen = false;
+    private boolean suppressResumeDialogOnce = false;
     private android.app.AlertDialog activeResumeDialog = null;
     
     private List<ChapterHelper.ChapterItem> activeChapters = new ArrayList<>();
@@ -666,10 +667,21 @@ public class PlayerActivity extends Activity {
             buttonPassthrough.setText(passthroughEnabled ? "PT" : "PCM");
             Utils.showText(playerView, passthroughEnabled ? "Audio: Passthrough" : "Audio: PCM", 1500);
             if (haveMedia && player != null) {
-                boolean wasPlaying = player.isPlaying();
-                savePlayer();
-                restorePlayState = wasPlaying;
-                initializePlayer();
+                String curPath = (mPrefs != null && mPrefs.mediaUri != null)
+                        ? mPrefs.mediaUri.toString().toLowerCase(java.util.Locale.US) : "";
+                boolean isPcmOnlyAudio = curPath.endsWith(".flac") || curPath.endsWith(".mp3")
+                        || curPath.endsWith(".m4a") || curPath.endsWith(".aac")
+                        || curPath.endsWith(".wav") || curPath.endsWith(".ogg") || curPath.endsWith(".opus");
+
+                if (!isPcmOnlyAudio) {
+                    long resumePos = player != null ? player.getCurrentPosition() : 0;
+                    suppressResumeDialogOnce = true;
+                    releasePlayer(true);
+                    initializePlayer();
+                    if (player != null && resumePos > 0) {
+                        player.seekTo(resumePos);
+                    }
+                }
             }
             resetHideCallbacks();
         });
@@ -1474,11 +1486,14 @@ public class PlayerActivity extends Activity {
 
         player = playerBuilder.build();
 
-        AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+        boolean isAudioFile = mPrefs != null && mPrefs.mediaUri != null && isAudioUri(mPrefs.mediaUri);
+        androidx.media3.common.AudioAttributes audioAttrs = new androidx.media3.common.AudioAttributes.Builder()
+                .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                .setContentType(isAudioFile
+                        ? androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC
+                        : androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
                 .build();
-        player.setAudioAttributes(audioAttributes, true);
+        player.setAudioAttributes(audioAttrs, true); 
 
         if (mPrefs.skipSilence) {
             player.setSkipSilenceEnabled(true);
@@ -3168,6 +3183,7 @@ public class PlayerActivity extends Activity {
     }
 
     private boolean hasSavedVideoResume() {
+        if (suppressResumeDialogOnce) return false;
         Uri uri = getActiveMediaUri();
         if (uri == null || isAudioUri(uri)) return false;
         long savedPos = getSharedPreferences("jsplayer_resume", MODE_PRIVATE)
@@ -3176,6 +3192,10 @@ public class PlayerActivity extends Activity {
     }
 
     private void checkAndShowVideoResumeDialog() {
+        if (suppressResumeDialogOnce) {
+            suppressResumeDialogOnce = false;
+            return;
+        }
         if (resumeDialogShownForCurrentItem || (activeResumeDialog != null && activeResumeDialog.isShowing())) return;
         Uri uri = getActiveMediaUri();
         if (player == null || uri == null || isAudioUri(uri)) return;
