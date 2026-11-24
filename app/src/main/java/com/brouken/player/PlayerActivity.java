@@ -1347,6 +1347,10 @@ public class PlayerActivity extends Activity {
             if (requestCode == 9912 && resultCode == RESULT_OK && data != null && data.getData() != null) {
                 attachExternalSubtitle(data.getData());
                 return;
+            } else if (requestCode == SubtitleStyleHelper.REQUEST_PICK_FONT && resultCode == RESULT_OK && data != null && data.getData() != null) {
+                SubtitleStyleHelper.importFontFromUri(this, data.getData());
+                updateSubtitleStyle(this);
+                return;
             }
         }
 
@@ -2191,13 +2195,13 @@ public class PlayerActivity extends Activity {
         if (subtitleView != null) {
             final float size;
             if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                size = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitlesScale;
+                size = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitlesScale * SubtitleStyleHelper.getSizeMultiplier(this);
             } else {
                 DisplayMetrics metrics = getResources().getDisplayMetrics();
                 float ratio = ((float)metrics.heightPixels / (float)metrics.widthPixels);
                 if (ratio < 1)
                     ratio = 1 / ratio;
-                size = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitlesScale / ratio;
+                size = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitlesScale / ratio * SubtitleStyleHelper.getSizeMultiplier(this);
             }
 
             subtitleView.setFractionalTextSize(size);
@@ -2344,19 +2348,7 @@ public class PlayerActivity extends Activity {
         final boolean isTablet = Utils.isTablet(context);
         subtitlesScale = SubtitleUtils.normalizeFontScale(captioningManager.getFontScale(), isTvBox || isTablet);
         if (subtitleView != null) {
-            final CaptioningManager.CaptionStyle userStyle = captioningManager.getUserStyle();
-            final CaptionStyleCompat userStyleCompat = CaptionStyleCompat.createFromCaptionStyle(userStyle);
-            final CaptionStyleCompat captionStyle = new CaptionStyleCompat(
-                    userStyle.hasForegroundColor() ? userStyleCompat.foregroundColor : Color.WHITE,
-                    userStyle.hasBackgroundColor() ? userStyleCompat.backgroundColor : Color.TRANSPARENT,
-                    userStyle.hasWindowColor() ? userStyleCompat.windowColor : Color.TRANSPARENT,
-                    userStyle.hasEdgeType() ? userStyleCompat.edgeType : CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                    userStyle.hasEdgeColor() ? userStyleCompat.edgeColor : Color.BLACK,
-                    Typeface.create(userStyleCompat.typeface != null ? userStyleCompat.typeface : Typeface.DEFAULT,
-                            mPrefs.subtitleStyleBold ? Typeface.BOLD : Typeface.NORMAL));
-            subtitleView.setStyle(captionStyle);
-            subtitleView.setApplyEmbeddedStyles(mPrefs.subtitleStyleEmbedded);
-            subtitleView.setBottomPaddingFraction(SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f);
+            SubtitleStyleHelper.applyStyle(context, subtitleView, mPrefs);
         }
         setSubtitleTextSize();
     }
@@ -2905,6 +2897,7 @@ public class PlayerActivity extends Activity {
     private void showSubtitleSourceDialog() {
         String secLang = SubtitleOnlineHelper.getSecondaryLangName(this);
         String[] options = {
+                "Subtitle Appearance & Position",
                 "Load Subtitle from File",
                 "Search Online - OpenSubtitles (No API Key)",
                 "Search Online - SubDL (Needs API key - add manually)",
@@ -2916,19 +2909,21 @@ public class PlayerActivity extends Activity {
                 .setTitle("Add Subtitles")
                 .setItems(options, (d, which) -> {
                     if (which == 0) {
+                        SubtitleStyleHelper.showAppearanceDialog(this, () -> updateSubtitleStyle(this));
+                    } else if (which == 1) {
                         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                         intent.addCategory(Intent.CATEGORY_OPENABLE);
                         intent.setType("*/*");
                         startActivityForResult(intent, 9912);
-                    } else if (which == 1) {
-                        showOnlineSubSearchDialog(false);
                     } else if (which == 2) {
-                        showOnlineSubSearchDialog(true);
+                        showOnlineSubSearchDialog(false);
                     } else if (which == 3) {
-                        showSecondaryLangDialog();
+                        showOnlineSubSearchDialog(true);
                     } else if (which == 4) {
-                        showSubdlKeyDialog();
+                        showSecondaryLangDialog();
                     } else if (which == 5) {
+                        showSubdlKeyDialog();
+                    } else if (which == 6) {
                         showDefaultLanguagesDialog();
                     }
                 })
