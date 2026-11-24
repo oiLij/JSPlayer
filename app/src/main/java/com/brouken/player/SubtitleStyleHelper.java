@@ -101,12 +101,12 @@ public class SubtitleStyleHelper {
         if (fontIdx == 1) {
             baseTf = Typeface.SANS_SERIF;
         } else if (fontIdx == 2) {
-            baseTf = Typeface.create("sans-serif-medium", Typeface.NORMAL);
+            baseTf = Typeface.createFromAsset(ctx.getAssets(), "fonts/Roboto-Medium.ttf");
         } else if (fontIdx == 3) {
             try {
                 baseTf = Typeface.createFromAsset(ctx.getAssets(), "fonts/NetflixSans.ttf");
             } catch (Exception e) {
-                baseTf = Typeface.create("sans-serif-medium", Typeface.NORMAL);
+                baseTf = Typeface.createFromAsset(ctx.getAssets(), "fonts/Roboto-Medium.ttf");
             }
         } else if (fontIdx == 4) {
             baseTf = Typeface.MONOSPACE;
