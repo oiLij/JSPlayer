@@ -197,6 +197,31 @@ public class PlayerActivity extends Activity {
     private boolean passthroughEnabled = true;
     private TextView buttonSync;
     private long audioDelayMs = 0;
+    private Uri externalAudioUri = null;
+    private Uri externalAudioForMediaUri = null;
+    private boolean selectExternalAudioPending = false;
+
+    private void applyExternalAudio(Uri uri) {
+        externalAudioUri = uri;
+        externalAudioForMediaUri = mPrefs != null ? mPrefs.mediaUri : null;
+        selectExternalAudioPending = (uri != null);
+        long pos = C.TIME_UNSET;
+        boolean isPlaying = false;
+        if (player != null) {
+            pos = player.getCurrentPosition();
+            isPlaying = player.isPlaying();
+        }
+        suppressResumeDialogOnce = true;
+        releasePlayer(true);
+        initializePlayer();
+        if (player != null && pos != C.TIME_UNSET) {
+            player.seekTo(pos);
+            if (isPlaying) {
+                player.play();
+            }
+        }
+        android.widget.Toast.makeText(this, uri != null ? "External audio attached" : "External audio cleared", android.widget.Toast.LENGTH_SHORT).show();
+    }
     private long subtitleDelayMs = 0;
     private ImageButton exoSettings;
     private ImageButton exoPlayPause;
@@ -697,6 +722,24 @@ public class PlayerActivity extends Activity {
         buttonSync.setText("Sync");
         buttonSync.setOnClickListener(view -> showAudioDelayDialog());
 
+        TextView buttonAudioExtra = new TextView(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
+        buttonAudioExtra.setId(View.generateViewId());
+        buttonAudioExtra.setGravity(Gravity.CENTER);
+        buttonAudioExtra.setTextColor(Color.WHITE);
+        buttonAudioExtra.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        buttonAudioExtra.setTypeface(Typeface.DEFAULT_BOLD);
+        buttonAudioExtra.setFocusable(true);
+        buttonAudioExtra.setClickable(true);
+        buttonAudioExtra.setText("Aud+");
+        buttonAudioExtra.setOnClickListener(v -> ExternalAudioHelper.showSourceDialog(this, externalAudioUri != null, new ExternalAudioHelper.AudioSelectedCallback() {
+            public void onAudioSelected(Uri u) {
+                applyExternalAudio(u);
+            }
+            public void onAudioCleared() {
+                applyExternalAudio(null);
+            }
+        }));
+
         TextView buttonSubExtra = new TextView(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
         buttonSubExtra.setId(View.generateViewId());
         buttonSubExtra.setGravity(Gravity.CENTER);
@@ -741,6 +784,7 @@ public class PlayerActivity extends Activity {
         controls.addView(exoSubtitle);
         controls.addView(buttonPassthrough);
         controls.addView(buttonSync);
+        controls.addView(buttonAudioExtra);
         controls.addView(buttonSubExtra);
         controls.addView(buttonChapters);
         controls.addView(buttonAspectRatio);
@@ -1351,6 +1395,9 @@ public class PlayerActivity extends Activity {
                 SubtitleStyleHelper.importFontFromUri(this, data.getData());
                 updateSubtitleStyle(this);
                 return;
+            } else if (requestCode == ExternalAudioHelper.REQUEST_PICK_AUDIO && resultCode == RESULT_OK && data != null && data.getData() != null) {
+                applyExternalAudio(data.getData());
+                return;
             }
         }
 
@@ -1600,6 +1647,11 @@ public class PlayerActivity extends Activity {
                 MediaItem.SubtitleConfiguration subtitle = SubtitleUtils.buildSubtitle(this, mPrefs.subtitleUri, null, true);
                 mediaItemBuilder.setSubtitleConfigurations(Collections.singletonList(subtitle));
             }
+            if (mPrefs.mediaUri != null && !mPrefs.mediaUri.equals(externalAudioForMediaUri)) {
+                externalAudioUri = null;
+                externalAudioForMediaUri = null;
+            }
+
             ArrayList<String> playlistUrls = getIntent() != null ? getIntent().getStringArrayListExtra("playlist_urls") : null;
             ArrayList<String> playlistTitles = getIntent() != null ? getIntent().getStringArrayListExtra("playlist_titles") : null;
             int playlistIndex = getIntent() != null ? getIntent().getIntExtra("playlist_index", 0) : 0;
@@ -1614,6 +1666,8 @@ public class PlayerActivity extends Activity {
                             .build());
                 }
                 player.setMediaItems(playlistItems, playlistIndex, C.TIME_UNSET);
+            } else if (externalAudioUri != null) {
+                player.setMediaSource(ExternalAudioHelper.buildMergedSource(this, mediaItemBuilder.build(), externalAudioUri, extractorsFactory, subtitleParserFactory), mPrefs.getPosition());
             } else {
                 player.setMediaItem(mediaItemBuilder.build(), mPrefs.getPosition());
             }
@@ -1964,6 +2018,10 @@ public class PlayerActivity extends Activity {
                     }
                     if (!apiAccess) {
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
+                    }
+                    if (selectExternalAudioPending) {
+                        selectExternalAudioPending = false;
+                        ExternalAudioHelper.selectLastAudioTrack(player);
                     }
                 }
             } else if (state == Player.STATE_ENDED) {
