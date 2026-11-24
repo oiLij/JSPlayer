@@ -31,8 +31,8 @@ public class SubtitleStyleHelper {
     private static final String[] BUILTIN_FONT_NAMES = {
             "Default",
             "Sans-Serif (Clean)",
-            "Sans-Serif Condensed",
-            "Serif (Cinema)",
+            "Roboto Medium",
+            "Netflix Sans",
             "Monospace",
             "Custom (.ttf/.otf)"
     };
@@ -101,9 +101,13 @@ public class SubtitleStyleHelper {
         if (fontIdx == 1) {
             baseTf = Typeface.SANS_SERIF;
         } else if (fontIdx == 2) {
-            baseTf = Typeface.create("sans-serif-condensed", Typeface.NORMAL);
+            baseTf = Typeface.create("sans-serif-medium", Typeface.NORMAL);
         } else if (fontIdx == 3) {
-            baseTf = Typeface.SERIF;
+            try {
+                baseTf = Typeface.createFromAsset(ctx.getAssets(), "fonts/NetflixSans.ttf");
+            } catch (Exception e) {
+                baseTf = Typeface.create("sans-serif-medium", Typeface.NORMAL);
+            }
         } else if (fontIdx == 4) {
             baseTf = Typeface.MONOSPACE;
         } else if (fontIdx == 5 && fontPath != null && !fontPath.isEmpty()) {
