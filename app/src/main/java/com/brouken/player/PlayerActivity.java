@@ -824,8 +824,8 @@ public class PlayerActivity extends Activity {
                 Utils.toggleSystemUi(PlayerActivity.this, playerView, visibility == View.VISIBLE);
                 if (visibility == View.VISIBLE) {
                     focusPlayPauseButton();
-                    playerView.post(this::focusPlayPauseButton);
-                    playerView.postDelayed(this::focusPlayPauseButton, 260);
+                    playerView.post(PlayerActivity.this::focusPlayPauseButton);
+                    playerView.postDelayed(PlayerActivity.this::focusPlayPauseButton, 260);
                 }
 
                 if (controllerVisible && playerView.isControllerFullyVisible()) {
@@ -1126,8 +1126,8 @@ public class PlayerActivity extends Activity {
                 if (!controllerVisibleFully) {
                     playerView.showController();
                     focusPlayPauseButton();
-                    playerView.post(this::focusPlayPauseButton);
-                    playerView.postDelayed(this::focusPlayPauseButton, 260);
+                    playerView.post(PlayerActivity.this::focusPlayPauseButton);
+                    playerView.postDelayed(PlayerActivity.this::focusPlayPauseButton, 260);
                     return true;
                 }
                 View focused = getCurrentFocus();

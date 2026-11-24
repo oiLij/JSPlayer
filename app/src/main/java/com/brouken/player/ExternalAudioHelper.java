@@ -23,7 +23,7 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.source.MergingMediaSource;
-import androidx.media3.exoplayer.text.SubtitleParser;
+import androidx.media3.extractor.text.SubtitleParser;
 import androidx.media3.extractor.ExtractorsFactory;
 
 import java.io.IOException;
