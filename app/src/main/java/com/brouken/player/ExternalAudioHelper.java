@@ -5,13 +5,13 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.text.InputType;
 import android.util.Base64;
-import android.widget.EditText;
 import android.widget.Toast;
 
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.MediaMetadata;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.Tracks;
 import androidx.media3.datasource.DataSource;
@@ -23,8 +23,8 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.source.MergingMediaSource;
-import androidx.media3.extractor.text.SubtitleParser;
 import androidx.media3.extractor.ExtractorsFactory;
+import androidx.media3.extractor.text.SubtitleParser;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -71,6 +71,7 @@ public class ExternalAudioHelper {
                 activeDataSource = new SmbDataSource();
             } else if ("http".equals(scheme) || "https".equals(scheme)) {
                 DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+                        .setUserAgent("JSPlayer")
                         .setAllowCrossProtocolRedirects(true);
                 String userInfo = dataSpec.uri.getUserInfo();
                 if (userInfo != null && userInfo.contains(":")) {
@@ -115,6 +116,25 @@ public class ExternalAudioHelper {
         }
     }
 
+    private static String guessAudioMimeType(Uri uri) {
+        if (uri == null) return null;
+        String lower = uri.toString().toLowerCase(Locale.US);
+        int q = lower.indexOf('?');
+        if (q > 0) lower = lower.substring(0, q);
+        if (lower.endsWith(".eac3") || lower.endsWith(".ec3")) return MimeTypes.AUDIO_E_AC3;
+        if (lower.endsWith(".ac3")) return MimeTypes.AUDIO_AC3;
+        if (lower.endsWith(".dts") || lower.endsWith(".dtshd")) return MimeTypes.AUDIO_DTS;
+        if (lower.endsWith(".thd") || lower.endsWith(".truehd")) return MimeTypes.AUDIO_TRUEHD;
+        if (lower.endsWith(".flac")) return MimeTypes.AUDIO_FLAC;
+        if (lower.endsWith(".aac")) return MimeTypes.AUDIO_AAC;
+        if (lower.endsWith(".m4a")) return MimeTypes.AUDIO_MP4;
+        if (lower.endsWith(".mp3")) return MimeTypes.AUDIO_MPEG;
+        if (lower.endsWith(".ogg") || lower.endsWith(".opus")) return MimeTypes.AUDIO_OGG;
+        if (lower.endsWith(".wav")) return MimeTypes.AUDIO_WAV;
+        if (lower.endsWith(".mka")) return MimeTypes.AUDIO_MATROSKA;
+        return null;
+    }
+
     public static MediaSource buildMergedSource(
             Context context,
             MediaItem videoItem,
@@ -122,38 +142,49 @@ public class ExternalAudioHelper {
             ExtractorsFactory extractorsFactory,
             SubtitleParser.Factory subtitleParserFactory) {
         DataSource.Factory routingFactory = () -> new RoutingDataSource(context);
-        MediaSource videoSource = new DefaultMediaSourceFactory(routingFactory, extractorsFactory)
+        MediaSource videoSource = new DefaultMediaSourceFactory(context, extractorsFactory)
+                .setDataSourceFactory(routingFactory)
                 .setSubtitleParserFactory(subtitleParserFactory)
                 .createMediaSource(videoItem);
-        MediaSource audioSource = new DefaultMediaSourceFactory(routingFactory, extractorsFactory)
-                .createMediaSource(new MediaItem.Builder().setUri(externalAudioUri).build());
-        return new MergingMediaSource(videoSource, audioSource);
+
+        MediaItem.Builder audioBuilder = new MediaItem.Builder()
+                .setUri(externalAudioUri)
+                .setMediaMetadata(new MediaMetadata.Builder().setTitle("External Audio").build());
+        String audioMime = guessAudioMimeType(externalAudioUri);
+        if (audioMime != null) {
+            audioBuilder.setMimeType(audioMime);
+        }
+        MediaSource audioSource = new DefaultMediaSourceFactory(context, extractorsFactory)
+                .setDataSourceFactory(routingFactory)
+                .createMediaSource(audioBuilder.build());
+
+        return new MergingMediaSource(true, true, videoSource, audioSource);
     }
 
-    public static void selectLastAudioTrack(ExoPlayer player) {
-        if (player == null) return;
+    public static boolean selectLastAudioTrack(ExoPlayer player) {
+        if (player == null) return false;
         Tracks tracks = player.getCurrentTracks();
-        Tracks.Group lastAudioGroup = null;
+        List<Tracks.Group> audioGroups = new ArrayList<>();
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() == C.TRACK_TYPE_AUDIO && group.length > 0) {
-                lastAudioGroup = group;
+                audioGroups.add(group);
             }
         }
-        if (lastAudioGroup != null) {
-            player.setTrackSelectionParameters(
-                    player.getTrackSelectionParameters()
-                            .buildUpon()
-                            .setOverrideForType(new TrackSelectionOverride(lastAudioGroup.getMediaTrackGroup(), 0))
-                            .build()
-            );
-        }
+        if (audioGroups.isEmpty()) return false;
+        Tracks.Group target = audioGroups.get(audioGroups.size() - 1);
+        player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters()
+                        .buildUpon()
+                        .setOverrideForType(new TrackSelectionOverride(target.getMediaTrackGroup(), 0))
+                        .build()
+        );
+        return audioGroups.size() >= 2;
     }
 
     public static void showSourceDialog(Activity activity, boolean hasExternalAudio, AudioSelectedCallback callback) {
         List<String> opts = new ArrayList<>();
         opts.add("Load Audio from Local / USB Storage");
         opts.add("Browse DLNA / SMB / FTP Network");
-        opts.add("Enter Audio Stream Link (HTTP / HTTPS)");
         if (hasExternalAudio) {
             opts.add("Remove External Audio Track");
         }
@@ -169,31 +200,10 @@ public class ExternalAudioHelper {
                         activity.startActivityForResult(intent, REQUEST_PICK_AUDIO);
                     } else if (which == 1) {
                         showNetworkServersDialog(activity, callback);
-                    } else if (which == 2) {
-                        showStreamUrlDialog(activity, callback);
-                    } else if (which == 3 && hasExternalAudio) {
+                    } else if (which == 2 && hasExternalAudio) {
                         callback.onAudioCleared();
                     }
                 })
-                .show();
-    }
-
-    private static void showStreamUrlDialog(Activity activity, AudioSelectedCallback callback) {
-        EditText input = new EditText(activity);
-        input.setHint("https://example.com/audio.eac3 or .m4a");
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        input.setSingleLine(true);
-
-        new AlertDialog.Builder(activity)
-                .setTitle("External Audio Stream URL")
-                .setView(input)
-                .setPositiveButton("Load", (d, w) -> {
-                    String url = input.getText().toString().trim();
-                    if (!url.isEmpty()) {
-                        callback.onAudioSelected(Uri.parse(url));
-                    }
-                })
-                .setNegativeButton("Cancel", null)
                 .show();
     }
 

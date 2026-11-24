@@ -290,11 +290,14 @@ public class NetworkBrowser {
     }
 
     private static boolean isMediaFile(String name) {
-        String n = name.toLowerCase();
+        String n = name.toLowerCase(java.util.Locale.US);
         return n.endsWith(".mkv") || n.endsWith(".mp4") || n.endsWith(".avi") || n.endsWith(".mov")
                 || n.endsWith(".webm") || n.endsWith(".ts") || n.endsWith(".m4v") || n.endsWith(".flv")
                 || n.endsWith(".flac") || n.endsWith(".mp3") || n.endsWith(".m4a") || n.endsWith(".wav")
-                || n.endsWith(".ogg") || n.endsWith(".opus");
+                || n.endsWith(".ogg") || n.endsWith(".opus") || n.endsWith(".eac3") || n.endsWith(".ec3")
+                || n.endsWith(".ac3") || n.endsWith(".dts") || n.endsWith(".dtshd") || n.endsWith(".thd")
+                || n.endsWith(".truehd") || n.endsWith(".mka") || n.endsWith(".aac") || n.endsWith(".wma")
+                || n.endsWith(".alac") || n.endsWith(".aiff") || n.endsWith(".mp2") || n.endsWith(".mpa");
     }
 
     public static List<NetItem> getSavedServers(Context context) {

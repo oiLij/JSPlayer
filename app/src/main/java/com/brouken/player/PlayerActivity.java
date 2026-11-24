@@ -1019,7 +1019,10 @@ public class PlayerActivity extends Activity {
     }
 
     private void focusPlayPauseButton() {
-        View target = findVisibleViewById(playerView, R.id.exo_play_pause);
+        View target = findVisibleViewById(playerView, R.id.btn_bl_play_pause);
+        if (target == null) {
+            target = findVisibleViewById(playerView, R.id.exo_play_pause);
+        }
         if (target == null && exoPlayPause != null && exoPlayPause.isShown()) {
             target = exoPlayPause;
         }
@@ -1856,6 +1859,11 @@ public class PlayerActivity extends Activity {
             if (!sdhAppliedForCurrentItem && !tracks.isEmpty()) {
                 sdhAppliedForCurrentItem = true;
                 TrackPrefHelper.applySmartSdhOverride(PlayerActivity.this, player, tracks);
+            }
+            if (externalAudioUri != null && selectExternalAudioPending && !tracks.isEmpty()) {
+                if (ExternalAudioHelper.selectLastAudioTrack(player)) {
+                    selectExternalAudioPending = false;
+                }
             }
         }
         

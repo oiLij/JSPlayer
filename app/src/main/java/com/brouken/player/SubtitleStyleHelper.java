@@ -10,7 +10,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.provider.OpenableColumns;
-import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -28,6 +27,15 @@ public class SubtitleStyleHelper {
     public static final int REQUEST_PICK_FONT = 9913;
     public static final float DEFAULT_BOTTOM_PADDING = SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f;
     private static final String PREFS_NAME = "jsplayer_sub_style";
+
+    private static final String[] BUILTIN_FONT_NAMES = {
+            "Default",
+            "Sans-Serif (Clean)",
+            "Sans-Serif Condensed",
+            "Serif (Cinema)",
+            "Monospace",
+            "Custom (.ttf/.otf)"
+    };
 
     private static final String[] TEXT_COLOR_NAMES = {"White", "Yellow", "Cyan", "Green", "Light Gray", "Orange", "Magenta"};
     private static final int[] TEXT_COLOR_RGB = {0xFFFFFF, 0xFFEB3B, 0x00E5FF, 0x76FF03, 0xCFD8DC, 0xFF9800, 0xFF4081};
@@ -73,9 +81,10 @@ public class SubtitleStyleHelper {
         if (subtitleView == null) return;
         SharedPreferences p = prefs(ctx);
 
-        float bottomPadding = p.getFloat("bottomPadding", DEFAULT_BOTTOM_PADDING);
+        int verticalOffset = p.getInt("verticalOffset", 0);
         boolean bold = p.getBoolean("bold", appPrefs != null && appPrefs.subtitleStyleBold);
         boolean italic = p.getBoolean("italic", false);
+        int fontIdx = p.getInt("fontIdx", 0) % BUILTIN_FONT_NAMES.length;
         int textColorIdx = p.getInt("textColorIdx", 0) % TEXT_COLOR_RGB.length;
         int textAlphaIdx = p.getInt("textAlphaIdx", 0) % TEXT_ALPHA_VALS.length;
         int bgColorIdx = p.getInt("bgColorIdx", 0) % BG_COLORS.length;
@@ -89,7 +98,15 @@ public class SubtitleStyleHelper {
         int fgColor = Color.argb(TEXT_ALPHA_VALS[textAlphaIdx], Color.red(rgb), Color.green(rgb), Color.blue(rgb));
 
         Typeface baseTf = Typeface.DEFAULT;
-        if (fontPath != null && !fontPath.isEmpty()) {
+        if (fontIdx == 1) {
+            baseTf = Typeface.SANS_SERIF;
+        } else if (fontIdx == 2) {
+            baseTf = Typeface.create("sans-serif-condensed", Typeface.NORMAL);
+        } else if (fontIdx == 3) {
+            baseTf = Typeface.SERIF;
+        } else if (fontIdx == 4) {
+            baseTf = Typeface.MONOSPACE;
+        } else if (fontIdx == 5 && fontPath != null && !fontPath.isEmpty()) {
             File f = new File(fontPath);
             if (f.exists() && f.length() > 0) {
                 try {
@@ -111,7 +128,12 @@ public class SubtitleStyleHelper {
         );
 
         subtitleView.setStyle(style);
-        subtitleView.setBottomPaddingFraction(bottomPadding);
+        subtitleView.setBottomPaddingFraction(DEFAULT_BOTTOM_PADDING);
+
+        int screenH = ctx.getResources().getDisplayMetrics().heightPixels;
+        float translateY = -(verticalOffset / 100f) * screenH;
+        subtitleView.setTranslationY(translateY);
+
         boolean applyEmbedded = !overrideEmbedded && (appPrefs == null || appPrefs.subtitleStyleEmbedded);
         subtitleView.setApplyEmbeddedStyles(applyEmbedded);
     }
@@ -144,6 +166,7 @@ public class SubtitleStyleHelper {
             prefs(ctx).edit()
                     .putString("customFontPath", outFile.getAbsolutePath())
                     .putString("customFontName", name)
+                    .putInt("fontIdx", 5)
                     .putBoolean("overrideEmbedded", true)
                     .apply();
             return true;
@@ -203,12 +226,12 @@ public class SubtitleStyleHelper {
 
         LinearLayout fontRow = new LinearLayout(activity);
         fontRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button cycleFontBtn = new Button(activity);
+        cycleFontBtn.setText("Switch Font");
         Button pickFontBtn = new Button(activity);
         pickFontBtn.setText("Pick .ttf/.otf");
-        Button resetFontBtn = new Button(activity);
-        resetFontBtn.setText("Default Font");
+        fontRow.addView(cycleFontBtn);
         fontRow.addView(pickFontBtn);
-        fontRow.addView(resetFontBtn);
         root.addView(fontRow);
 
         LinearLayout styleRow = new LinearLayout(activity);
@@ -251,10 +274,13 @@ public class SubtitleStyleHelper {
         root.addView(resetAllBtn);
 
         Runnable refresh = () -> {
-            float pos = p.getFloat("bottomPadding", DEFAULT_BOTTOM_PADDING);
-            posLabel.setText(String.format(Locale.US, "Vertical Position: %.1f%% (0%% = Bottom Edge)", pos * 100f));
+            int offset = p.getInt("verticalOffset", 0);
+            String posTag = offset == 0 ? "0% (Default)" : (offset > 0 ? "+" + offset + "% (Higher)" : offset + "% (Lower)");
+            posLabel.setText("Vertical Position: " + posTag);
             sizeLabel.setText("Font Size: " + p.getInt("sizePercent", 100) + "%");
-            fontLabel.setText("Font: " + p.getString("customFontName", "Default"));
+            int fontIdx = p.getInt("fontIdx", 0) % BUILTIN_FONT_NAMES.length;
+            String fName = fontIdx == 5 ? p.getString("customFontName", "Custom (.ttf/.otf)") : BUILTIN_FONT_NAMES[fontIdx];
+            fontLabel.setText("Font: " + fName);
             boldBtn.setText("Bold: " + (p.getBoolean("bold", false) ? "ON" : "OFF"));
             italicBtn.setText("Italic: " + (p.getBoolean("italic", false) ? "ON" : "OFF"));
             textColorBtn.setText("Color: " + TEXT_COLOR_NAMES[p.getInt("textColorIdx", 0) % TEXT_COLOR_NAMES.length]);
@@ -268,17 +294,17 @@ public class SubtitleStyleHelper {
         };
 
         posDown.setOnClickListener(v -> {
-            float next = Math.max(0.0f, p.getFloat("bottomPadding", DEFAULT_BOTTOM_PADDING) - 0.01f);
-            p.edit().putFloat("bottomPadding", next).apply();
+            int next = Math.max(-6, p.getInt("verticalOffset", 0) - 1);
+            p.edit().putInt("verticalOffset", next).apply();
             refresh.run();
         });
         posUp.setOnClickListener(v -> {
-            float next = Math.min(0.35f, p.getFloat("bottomPadding", DEFAULT_BOTTOM_PADDING) + 0.01f);
-            p.edit().putFloat("bottomPadding", next).apply();
+            int next = Math.min(30, p.getInt("verticalOffset", 0) + 1);
+            p.edit().putInt("verticalOffset", next).apply();
             refresh.run();
         });
         posReset.setOnClickListener(v -> {
-            p.edit().putFloat("bottomPadding", DEFAULT_BOTTOM_PADDING).apply();
+            p.edit().putInt("verticalOffset", 0).apply();
             refresh.run();
         });
 
@@ -294,6 +320,14 @@ public class SubtitleStyleHelper {
         });
         sizeReset.setOnClickListener(v -> {
             p.edit().putInt("sizePercent", 100).apply();
+            refresh.run();
+        });
+
+        cycleFontBtn.setOnClickListener(v -> {
+            boolean hasCustom = !p.getString("customFontPath", "").isEmpty();
+            int maxIdx = hasCustom ? BUILTIN_FONT_NAMES.length : BUILTIN_FONT_NAMES.length - 1;
+            int next = (p.getInt("fontIdx", 0) + 1) % maxIdx;
+            p.edit().putInt("fontIdx", next).apply();
             refresh.run();
         });
 
@@ -331,10 +365,6 @@ public class SubtitleStyleHelper {
         });
         overrideBtn.setOnClickListener(v -> {
             p.edit().putBoolean("overrideEmbedded", !p.getBoolean("overrideEmbedded", false)).apply();
-            refresh.run();
-        });
-        resetFontBtn.setOnClickListener(v -> {
-            p.edit().remove("customFontPath").remove("customFontName").apply();
             refresh.run();
         });
         resetAllBtn.setOnClickListener(v -> {
