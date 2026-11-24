@@ -142,6 +142,7 @@
     <include layout="@layout/exo_player_control_rewind_button" />
 
     <ImageButton android:id="@+id/exo_play_pause"
+        android:focusedByDefault="true"
         style="@style/ExoStyledControls.Button.Center.PlayPause"/>
 
     <ProgressBar android:id="@+id/loading"

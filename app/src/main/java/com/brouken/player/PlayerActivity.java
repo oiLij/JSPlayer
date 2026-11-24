@@ -779,8 +779,9 @@ public class PlayerActivity extends Activity {
                 // https://developer.android.com/training/system-ui/immersive
                 Utils.toggleSystemUi(PlayerActivity.this, playerView, visibility == View.VISIBLE);
                 if (visibility == View.VISIBLE) {
-                    // Because when using dpad controls, focus resets to first item in bottom controls bar
-                    findViewById(R.id.exo_play_pause).requestFocus();
+                    focusPlayPauseButton();
+                    playerView.post(this::focusPlayPauseButton);
+                    playerView.postDelayed(this::focusPlayPauseButton, 260);
                 }
 
                 if (controllerVisible && playerView.isControllerFullyVisible()) {
@@ -960,6 +961,29 @@ public class PlayerActivity extends Activity {
     }
 
     @SuppressLint("GestureBackNavigation")
+    private View findVisibleViewById(View root, int id) {
+        if (root == null || root.getVisibility() != View.VISIBLE) return null;
+        if (root.getId() == id) return root;
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup vg = (android.view.ViewGroup) root;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                View found = findVisibleViewById(vg.getChildAt(i), id);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private void focusPlayPauseButton() {
+        View target = findVisibleViewById(playerView, R.id.exo_play_pause);
+        if (target == null && exoPlayPause != null && exoPlayPause.isShown()) {
+            target = exoPlayPause;
+        }
+        if (target != null) {
+            target.requestFocus();
+        }
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         switch (keyCode) {
@@ -1051,6 +1075,21 @@ public class PlayerActivity extends Activity {
                     } else {
                         onBackPressed();
                     }
+                }
+                break;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (!controllerVisibleFully) {
+                    playerView.showController();
+                    focusPlayPauseButton();
+                    playerView.post(this::focusPlayPauseButton);
+                    playerView.postDelayed(this::focusPlayPauseButton, 260);
+                    return true;
+                }
+                View focused = getCurrentFocus();
+                if (focused == null || focused == playerView || focused.getId() == R.id.exo_prev) {
+                    focusPlayPauseButton();
+                    return true;
                 }
                 break;
             case KeyEvent.KEYCODE_UNKNOWN:
