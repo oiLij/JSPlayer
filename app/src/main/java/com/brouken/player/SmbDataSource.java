@@ -45,7 +45,7 @@ public class SmbDataSource extends BaseDataSource {
         super(/* isNetwork= */ true);
     }
 
-    private static CIFSContext getOrCreateContext(String scheme, String host, String userInfo) throws IOException {
+    static CIFSContext getOrCreateContext(String scheme, String host, String userInfo) throws IOException {
         String key = scheme + "|" + host + "|" + (userInfo != null ? userInfo : "");
         CIFSContext cached = CONTEXT_CACHE.get(key);
         if (cached != null) return cached;

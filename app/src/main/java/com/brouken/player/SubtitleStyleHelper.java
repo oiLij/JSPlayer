@@ -21,12 +21,12 @@ import androidx.media3.ui.SubtitleView;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.util.Locale;
 
 public class SubtitleStyleHelper {
     public static final int REQUEST_PICK_FONT = 9913;
     public static final float DEFAULT_BOTTOM_PADDING = SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION * 2f / 3f;
     private static final String PREFS_NAME = "jsplayer_sub_style";
+    private static final int[] SIZE_STEPS = {75, 80, 90, 100, 110, 120, 130, 140, 150};
 
     private static final String[] BUILTIN_FONT_NAMES = {
             "Default",
@@ -73,15 +73,40 @@ public class SubtitleStyleHelper {
         return ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
+    private static int clampSize(int val) {
+        int best = 100;
+        int bestDiff = Integer.MAX_VALUE;
+        for (int s : SIZE_STEPS) {
+            int diff = Math.abs(s - val);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = s;
+            }
+        }
+        return best;
+    }
+
+    private static int stepSize(int current, int dir) {
+        int norm = clampSize(current);
+        for (int i = 0; i < SIZE_STEPS.length; i++) {
+            if (SIZE_STEPS[i] == norm) {
+                int nextIdx = Math.max(0, Math.min(SIZE_STEPS.length - 1, i + dir));
+                return SIZE_STEPS[nextIdx];
+            }
+        }
+        return 100;
+    }
+
     public static float getSizeMultiplier(Context ctx) {
-        return prefs(ctx).getInt("sizePercent", 100) / 100f;
+        int pct = clampSize(prefs(ctx).getInt("sizePercent", 100));
+        return (pct * 1.10f) / 100f;
     }
 
     public static void applyStyle(Context ctx, SubtitleView subtitleView, Prefs appPrefs) {
         if (subtitleView == null) return;
         SharedPreferences p = prefs(ctx);
 
-        int verticalOffset = p.getInt("verticalOffset", 0);
+        int verticalOffset = Math.max(-3, Math.min(15, p.getInt("verticalOffset", 0)));
         boolean bold = p.getBoolean("bold", appPrefs != null && appPrefs.subtitleStyleBold);
         boolean italic = p.getBoolean("italic", false);
         int fontIdx = p.getInt("fontIdx", 0) % BUILTIN_FONT_NAMES.length;
@@ -101,12 +126,16 @@ public class SubtitleStyleHelper {
         if (fontIdx == 1) {
             baseTf = Typeface.SANS_SERIF;
         } else if (fontIdx == 2) {
-            baseTf = Typeface.createFromAsset(ctx.getAssets(), "fonts/Roboto-Medium.ttf");
+            try {
+                baseTf = Typeface.createFromAsset(ctx.getAssets(), "fonts/Roboto-Medium.ttf");
+            } catch (Exception e) {
+                baseTf = Typeface.create("sans-serif-medium", Typeface.NORMAL);
+            }
         } else if (fontIdx == 3) {
             try {
                 baseTf = Typeface.createFromAsset(ctx.getAssets(), "fonts/NetflixSans.ttf");
             } catch (Exception e) {
-                baseTf = Typeface.createFromAsset(ctx.getAssets(), "fonts/Roboto-Medium.ttf");
+                baseTf = Typeface.create("sans-serif-medium", Typeface.NORMAL);
             }
         } else if (fontIdx == 4) {
             baseTf = Typeface.MONOSPACE;
@@ -213,11 +242,11 @@ public class SubtitleStyleHelper {
         LinearLayout sizeRow = new LinearLayout(activity);
         sizeRow.setOrientation(LinearLayout.HORIZONTAL);
         Button sizeDown = new Button(activity);
-        sizeDown.setText("-10%");
+        sizeDown.setText("-");
         Button sizeReset = new Button(activity);
         sizeReset.setText("100%");
         Button sizeUp = new Button(activity);
-        sizeUp.setText("+10%");
+        sizeUp.setText("+");
         sizeRow.addView(sizeDown);
         sizeRow.addView(sizeReset);
         sizeRow.addView(sizeUp);
@@ -278,10 +307,10 @@ public class SubtitleStyleHelper {
         root.addView(resetAllBtn);
 
         Runnable refresh = () -> {
-            int offset = p.getInt("verticalOffset", 0);
+            int offset = Math.max(-3, Math.min(15, p.getInt("verticalOffset", 0)));
             String posTag = offset == 0 ? "0% (Default)" : (offset > 0 ? "+" + offset + "% (Higher)" : offset + "% (Lower)");
             posLabel.setText("Vertical Position: " + posTag);
-            sizeLabel.setText("Font Size: " + p.getInt("sizePercent", 100) + "%");
+            sizeLabel.setText("Font Size: " + clampSize(p.getInt("sizePercent", 100)) + "%");
             int fontIdx = p.getInt("fontIdx", 0) % BUILTIN_FONT_NAMES.length;
             String fName = fontIdx == 5 ? p.getString("customFontName", "Custom (.ttf/.otf)") : BUILTIN_FONT_NAMES[fontIdx];
             fontLabel.setText("Font: " + fName);
@@ -298,12 +327,12 @@ public class SubtitleStyleHelper {
         };
 
         posDown.setOnClickListener(v -> {
-            int next = Math.max(-6, p.getInt("verticalOffset", 0) - 1);
+            int next = Math.max(-3, p.getInt("verticalOffset", 0) - 1);
             p.edit().putInt("verticalOffset", next).apply();
             refresh.run();
         });
         posUp.setOnClickListener(v -> {
-            int next = Math.min(30, p.getInt("verticalOffset", 0) + 1);
+            int next = Math.min(15, p.getInt("verticalOffset", 0) + 1);
             p.edit().putInt("verticalOffset", next).apply();
             refresh.run();
         });
@@ -313,12 +342,12 @@ public class SubtitleStyleHelper {
         });
 
         sizeDown.setOnClickListener(v -> {
-            int next = Math.max(50, p.getInt("sizePercent", 100) - 10);
+            int next = stepSize(p.getInt("sizePercent", 100), -1);
             p.edit().putInt("sizePercent", next).apply();
             refresh.run();
         });
         sizeUp.setOnClickListener(v -> {
-            int next = Math.min(200, p.getInt("sizePercent", 100) + 10);
+            int next = stepSize(p.getInt("sizePercent", 100), 1);
             p.edit().putInt("sizePercent", next).apply();
             refresh.run();
         });

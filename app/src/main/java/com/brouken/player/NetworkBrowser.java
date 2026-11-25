@@ -79,6 +79,7 @@ public class NetworkBrowser {
     private static final String PREFS_NAME = "jsplayer_network";
     private static final String KEY_SERVERS = "saved_servers";
     private static final ExecutorService executor = Executors.newCachedThreadPool();
+    private static final java.util.concurrent.ConcurrentHashMap<String, List<NetItem>> DIR_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private NsdManager nsdManager;
@@ -188,6 +189,12 @@ public class NetworkBrowser {
     }
 
     public static void browseFtp(String host, int port, String user, String pass, String dirPath, ListCallback callback) {
+        String cacheKey = "ftp|" + host + "|" + port + "|" + (user != null ? user : "") + "|" + dirPath;
+        List<NetItem> cached = DIR_CACHE.get(cacheKey);
+        if (cached != null) {
+            mainHandler.post(() -> callback.onResult(new ArrayList<>(cached), null));
+            return;
+        }
         executor.execute(() -> {
             List<NetItem> result = new ArrayList<>();
             FTPClient client = new FTPClient();
@@ -219,6 +226,8 @@ public class NetworkBrowser {
                 }
                 client.logout();
                 client.disconnect();
+                DIR_CACHE.put(cacheKey, new ArrayList<>(result));
+                DIR_CACHE.put(cacheKey, new ArrayList<>(result));
                 mainHandler.post(() -> callback.onResult(result, null));
             } catch (Exception e) {
                 mainHandler.post(() -> callback.onResult(result, e.getMessage()));
@@ -227,21 +236,20 @@ public class NetworkBrowser {
     }
 
     public static void browseSmb(String protocol, String host, int port, String user, String pass, String dirPath, ListCallback callback) {
+        String cacheKey = protocol + "|" + host + "|" + port + "|" + (user != null ? user : "") + "|" + dirPath;
+        List<NetItem> cached = DIR_CACHE.get(cacheKey);
+        if (cached != null) {
+            mainHandler.post(() -> callback.onResult(new ArrayList<>(cached), null));
+            return;
+        }
         executor.execute(() -> {
             List<NetItem> result = new ArrayList<>();
             try {
-                Properties props = new Properties();
-                if ("smb1".equals(protocol)) {
-                    props.setProperty("jcifs.smb.client.minVersion", "SMB1");
-                    props.setProperty("jcifs.smb.client.maxVersion", "SMB1");
-                } else {
-                    props.setProperty("jcifs.smb.client.minVersion", "SMB202");
-                    props.setProperty("jcifs.smb.client.maxVersion", "SMB311");
+                String userInfo = null;
+                if (user != null && !user.isEmpty()) {
+                    userInfo = URLEncoder.encode(user, "UTF-8") + ":" + URLEncoder.encode(pass != null ? pass : "", "UTF-8");
                 }
-                CIFSContext base = new BaseContext(new PropertyConfiguration(props));
-                CIFSContext ctx = (user != null && !user.isEmpty())
-                        ? base.withCredentials(new NtlmPasswordAuthenticator(null, user, pass != null ? pass : ""))
-                        : base.withAnonymousCredentials();
+                CIFSContext ctx = SmbDataSource.getOrCreateContext(protocol, host, userInfo);
 
                 String cleanDir = dirPath.startsWith("/") ? dirPath : "/" + dirPath;
                 if (!cleanDir.endsWith("/")) cleanDir += "/";

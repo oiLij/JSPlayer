@@ -731,14 +731,25 @@ public class PlayerActivity extends Activity {
         buttonAudioExtra.setFocusable(true);
         buttonAudioExtra.setClickable(true);
         buttonAudioExtra.setText("Aud+");
-        buttonAudioExtra.setOnClickListener(v -> ExternalAudioHelper.showSourceDialog(this, externalAudioUri != null, new ExternalAudioHelper.AudioSelectedCallback() {
-            public void onAudioSelected(Uri u) {
-                applyExternalAudio(u);
+        buttonAudioExtra.setOnClickListener(v -> {
+            final boolean wasPlaying = player != null && player.isPlaying();
+            if (wasPlaying) {
+                player.pause();
             }
-            public void onAudioCleared() {
-                applyExternalAudio(null);
-            }
-        }));
+            ExternalAudioHelper.showSourceDialog(this, externalAudioUri != null, new ExternalAudioHelper.AudioSelectedCallback() {
+                public void onAudioSelected(Uri u) {
+                    applyExternalAudio(u);
+                }
+                public void onAudioCleared() {
+                    applyExternalAudio(null);
+                }
+                public void onDialogClosedWithoutSelection() {
+                    if (wasPlaying && player != null) {
+                        player.play();
+                    }
+                }
+            });
+        });
 
         TextView buttonSubExtra = new TextView(this, null, 0, R.style.ExoStyledControls_Button_Bottom);
         buttonSubExtra.setId(View.generateViewId());
@@ -1525,7 +1536,7 @@ public class PlayerActivity extends Activity {
                         : new DefaultAudioSink.Builder(context)
                                 .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
                                 .setEnableFloatOutput(enableFloatOutput)
-                                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                                .setEnableAudioTrackPlaybackParams(false)
                                 .build();
                 if (baseSink == null) {
                     return null;
@@ -1805,19 +1816,19 @@ public class PlayerActivity extends Activity {
             if (player.isPlaying() && restorePlayStateAllowed) {
                 restorePlayState = true;
             }
-            player.removeListener(playerListener);
-            player.clearMediaItems();
-            if (player != null && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
+            if (mPrefs != null && mPrefs.mediaUri != null && !isAudioUri(mPrefs.mediaUri)) {
                 long pos = player.getCurrentPosition();
                 long dur = player.getDuration();
                 android.content.SharedPreferences sp = getSharedPreferences("jsplayer_resume", MODE_PRIVATE);
                 String key = mPrefs.mediaUri.toString();
                 if (pos > 5000 && (dur <= 0 || pos < dur - 10000)) {
-                    sp.edit().putLong(key, pos).apply();
+                    sp.edit().putLong(key, pos).commit();
                 } else if (dur > 0 && pos >= dur - 10000) {
-                    sp.edit().remove(key).apply(); // Cleared once video finishes
+                    sp.edit().remove(key).commit();
                 }
             }
+            player.removeListener(playerListener);
+            player.clearMediaItems();
             player.release();
             player = null;
         }
@@ -1861,7 +1872,7 @@ public class PlayerActivity extends Activity {
                 TrackPrefHelper.applySmartSdhOverride(PlayerActivity.this, player, tracks);
             }
             if (externalAudioUri != null && selectExternalAudioPending && !tracks.isEmpty()) {
-                if (ExternalAudioHelper.selectLastAudioTrack(player)) {
+                if (ExternalAudioHelper.selectLastAudioTrack(player, trackSelector)) {
                     selectExternalAudioPending = false;
                 }
             }
@@ -2029,7 +2040,7 @@ public class PlayerActivity extends Activity {
                     }
                     if (selectExternalAudioPending) {
                         selectExternalAudioPending = false;
-                        ExternalAudioHelper.selectLastAudioTrack(player);
+                        ExternalAudioHelper.selectLastAudioTrack(player, trackSelector);
                     }
                 }
             } else if (state == Player.STATE_ENDED) {
@@ -3294,6 +3305,7 @@ public class PlayerActivity extends Activity {
     private void checkAndShowVideoResumeDialog() {
         if (suppressResumeDialogOnce) {
             suppressResumeDialogOnce = false;
+            resumeDialogShownForCurrentItem = true;
             return;
         }
         if (resumeDialogShownForCurrentItem || (activeResumeDialog != null && activeResumeDialog.isShowing())) return;
