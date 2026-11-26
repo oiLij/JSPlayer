@@ -1562,8 +1562,14 @@ public class PlayerActivity extends Activity {
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(this, extractorsFactory)
                 .setSubtitleParserFactory(subtitleParserFactory);
 
+        androidx.media3.exoplayer.DefaultLoadControl loadControl = new androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(15000, 45000, 1000, 1500)
+                .setBackBuffer(20000, true)
+                .build();
+        
         ExoPlayer.Builder playerBuilder = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(trackSelector)
+                .setLoadControl(loadControl)
                 .setMediaSourceFactory(mediaSourceFactory);
 
         if (haveMedia && mPrefs.mediaUri != null && mPrefs.mediaUri.getScheme() != null) {
@@ -1579,15 +1585,24 @@ public class PlayerActivity extends Activity {
             }
         }
         if (haveMedia && isNetworkUri) {
-            if (mPrefs.mediaUri.getScheme().toLowerCase().startsWith("http")) {
+            String netScheme = mPrefs.mediaUri.getScheme() != null ? mPrefs.mediaUri.getScheme().toLowerCase() : "";
+            if (netScheme.startsWith("http")) {
                 HashMap<String, String> headers = new HashMap<>();
+                headers.put("Connection", "keep-alive");
                 String userInfo = mPrefs.mediaUri.getUserInfo();
                 if (userInfo != null && userInfo.length() > 0 && userInfo.contains(":")) {
                     headers.put("Authorization", "Basic " + Base64.encodeToString(userInfo.getBytes(), Base64.NO_WRAP));
-                    DefaultHttpDataSource.Factory defaultHttpDataSourceFactory = new DefaultHttpDataSource.Factory();
-                    defaultHttpDataSourceFactory.setDefaultRequestProperties(headers);
-                    playerBuilder.setMediaSourceFactory(new DefaultMediaSourceFactory(defaultHttpDataSourceFactory, extractorsFactory));
                 }
+                DefaultHttpDataSource.Factory defaultHttpDataSourceFactory = new DefaultHttpDataSource.Factory()
+                        .setUserAgent("JSPlayer")
+                        .setConnectTimeoutMs(20000)
+                        .setReadTimeoutMs(20000)
+                        .setAllowCrossProtocolRedirects(true)
+                        .setDefaultRequestProperties(headers);
+                playerBuilder.setMediaSourceFactory(
+                        new DefaultMediaSourceFactory(defaultHttpDataSourceFactory, extractorsFactory)
+                                .setSubtitleParserFactory(subtitleParserFactory)
+                                .setLoadErrorHandlingPolicy(new androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy(6)));
             }
         }
 
@@ -1948,11 +1963,47 @@ public class PlayerActivity extends Activity {
             }
         }
 
+        private long lastWatchdogPos = -1L;
+        private int stallTicks = 0;
+        private final Runnable frameStallWatchdog = new Runnable() {
+            @Override
+            public void run() {
+                if (player != null && haveMedia && !isResumeDialogOpen
+                        && player.getPlaybackState() == Player.STATE_READY
+                        && player.getPlayWhenReady()) {
+                    long cur = player.getCurrentPosition();
+                    if (lastWatchdogPos >= 0 && cur == lastWatchdogPos) {
+                        stallTicks++;
+                        if (stallTicks >= 2) {
+                            stallTicks = 0;
+                            lastWatchdogPos = -1L;
+                            player.pause();
+                            player.seekTo(cur);
+                            player.play();
+                        }
+                    } else {
+                        stallTicks = 0;
+                        lastWatchdogPos = cur;
+                    }
+                } else {
+                    stallTicks = 0;
+                    lastWatchdogPos = -1L;
+                }
+                if (player != null && player.getPlaybackState() != Player.STATE_ENDED) {
+                    skipHandler.postDelayed(this, 1500);
+                }
+            }
+        };
+        
         @SuppressLint("SourceLockedOrientationActivity")
         @Override
         public void onPlaybackStateChanged(int state) {
             if (state == androidx.media3.common.Player.STATE_READY) {
                 checkAndShowVideoResumeDialog();
+                skipHandler.removeCallbacks(frameStallWatchdog);
+                skipHandler.postDelayed(frameStallWatchdog, 1500);
+            } else if (state == Player.STATE_ENDED) {
+                skipHandler.removeCallbacks(frameStallWatchdog);
             }
             boolean isNearEnd = false;
             final long duration = player.getDuration();
