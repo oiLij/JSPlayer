@@ -140,7 +140,7 @@ public class ExternalAudioHelper {
                 .setDataSourceFactory(routingFactory)
                 .createMediaSource(audioItem);
 
-        return new MergingMediaSource(videoSource, audioSource);
+        return new MergingMediaSource(true, false, videoSource, audioSource);
     }
 
     public static boolean selectLastAudioTrack(ExoPlayer player, DefaultTrackSelector trackSelector) {
@@ -158,6 +158,8 @@ public class ExternalAudioHelper {
         if (trackSelector != null) {
             trackSelector.setParameters(
                     trackSelector.buildUponParameters()
+                            .setExceedAudioConstraintsIfNecessary(true)
+                            .setExceedRendererCapabilitiesIfNecessary(true)
                             .setOverrideForType(override)
                             .build()
             );

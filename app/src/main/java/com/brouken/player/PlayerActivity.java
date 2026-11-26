@@ -1455,7 +1455,9 @@ public class PlayerActivity extends Activity {
 
         trackSelector = new DefaultTrackSelector(this);
         trackSelector.setParameters(trackSelector.buildUponParameters()
-                .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true));
+                .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
+                .setExceedAudioConstraintsIfNecessary(true)
+                .setExceedRendererCapabilitiesIfNecessary(true));
         if (mPrefs.tunneling) {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setTunnelingEnabled(true)
@@ -1535,6 +1537,7 @@ public class PlayerActivity extends Activity {
                         ? super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
                         : new DefaultAudioSink.Builder(context)
                                 .setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+                                .setAudioProcessorChain(new DefaultAudioSink.DefaultAudioProcessorChain())
                                 .setEnableFloatOutput(enableFloatOutput)
                                 .setEnableAudioTrackPlaybackParams(false)
                                 .build();
@@ -1554,7 +1557,7 @@ public class PlayerActivity extends Activity {
             }
         }.setExtensionRendererMode(passthroughEnabled
                 ? DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-                : mPrefs.decoderPriority);
+                : DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
 
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(this, extractorsFactory)
                 .setSubtitleParserFactory(subtitleParserFactory);
@@ -1671,15 +1674,26 @@ public class PlayerActivity extends Activity {
             int playlistIndex = getIntent() != null ? getIntent().getIntExtra("playlist_index", 0) : 0;
 
             if (playlistUrls != null && playlistUrls.size() > 1) {
-                List<MediaItem> playlistItems = new ArrayList<>();
+                androidx.media3.datasource.DataSource.Factory routingFactory = () -> new ExternalAudioHelper.RoutingDataSource(this);
+                DefaultMediaSourceFactory playlistSourceFactory = new DefaultMediaSourceFactory(this, extractorsFactory)
+                        .setDataSourceFactory(routingFactory)
+                        .setSubtitleParserFactory(subtitleParserFactory);
+                List<androidx.media3.exoplayer.source.MediaSource> playlistSources = new ArrayList<>();
                 for (int i = 0; i < playlistUrls.size(); i++) {
                     String t = (playlistTitles != null && i < playlistTitles.size()) ? playlistTitles.get(i) : "";
-                    playlistItems.add(new MediaItem.Builder()
-                            .setUri(Uri.parse(playlistUrls.get(i)))
-                            .setMediaMetadata(new MediaMetadata.Builder().setTitle(t).build())
-                            .build());
+                    MediaItem item = (i == playlistIndex)
+                            ? mediaItemBuilder.build()
+                            : new MediaItem.Builder()
+                                    .setUri(Uri.parse(playlistUrls.get(i)))
+                                    .setMediaMetadata(new MediaMetadata.Builder().setTitle(t).build())
+                                    .build();
+                    if (i == playlistIndex && externalAudioUri != null) {
+                        playlistSources.add(ExternalAudioHelper.buildMergedSource(this, item, externalAudioUri, extractorsFactory, subtitleParserFactory));
+                    } else {
+                        playlistSources.add(playlistSourceFactory.createMediaSource(item));
+                    }
                 }
-                player.setMediaItems(playlistItems, playlistIndex, C.TIME_UNSET);
+                player.setMediaSources(playlistSources, playlistIndex, mPrefs.getPosition());
             } else if (externalAudioUri != null) {
                 player.setMediaSource(ExternalAudioHelper.buildMergedSource(this, mediaItemBuilder.build(), externalAudioUri, extractorsFactory, subtitleParserFactory), mPrefs.getPosition());
             } else {
@@ -2035,10 +2049,10 @@ public class PlayerActivity extends Activity {
                     if (mPrefs.speed <= 0.99f || mPrefs.speed >= 1.01f) {
                         player.setPlaybackSpeed(mPrefs.speed);
                     }
-                    if (!apiAccess) {
+                    if (!apiAccess && externalAudioUri == null) {
                         setSelectedTracks(mPrefs.subtitleTrackId, mPrefs.audioTrackId);
                     }
-                    if (selectExternalAudioPending) {
+                    if (selectExternalAudioPending || externalAudioUri != null) {
                         selectExternalAudioPending = false;
                         ExternalAudioHelper.selectLastAudioTrack(player, trackSelector);
                     }
@@ -2048,6 +2062,13 @@ public class PlayerActivity extends Activity {
                 if (apiAccess) {
                     finish();
                 }
+            }
+        }
+
+        @Override
+        public void onPlaybackParametersChanged(androidx.media3.common.PlaybackParameters playbackParameters) {
+            if (mPrefs != null) {
+                mPrefs.speed = playbackParameters.speed;
             }
         }
 
@@ -3283,6 +3304,10 @@ public class PlayerActivity extends Activity {
     private void saveVideoResumePosition() {
         Uri uri = getActiveMediaUri();
         if (player == null || uri == null || isAudioUri(uri)) return;
+        if (player.getCurrentPosition() > 15000) {
+            resumeDialogShownForCurrentItem = true;
+            return;
+        }
         long pos = player.getCurrentPosition();
         long dur = player.getDuration();
         android.content.SharedPreferences rsp = getSharedPreferences("jsplayer_resume", MODE_PRIVATE);
