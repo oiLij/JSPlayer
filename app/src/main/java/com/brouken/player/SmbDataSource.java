@@ -30,6 +30,8 @@ public class SmbDataSource extends BaseDataSource {
     }
 
     private static final ConcurrentHashMap<String, CIFSContext> CONTEXT_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, CIFSContext> CONTEXT_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Long> FILE_LENGTH_CACHE = new ConcurrentHashMap<>();
     private static final int BUFFER_SIZE = 262144; // 256 KB read-ahead buffer
     private final byte[] internalBuf = new byte[BUFFER_SIZE];
     private int bufPos = 0;
@@ -94,7 +96,14 @@ public class SmbDataSource extends BaseDataSource {
 
         try {
             smbFile = new SmbFile(cleanUrl, ctx);
-            long fileLength = smbFile.length();
+            Long cachedLen = FILE_LENGTH_CACHE.get(cleanUrl);
+            long fileLength;
+            if (cachedLen != null && cachedLen > 0) {
+                fileLength = cachedLen;
+            } else {
+                fileLength = smbFile.length();
+                if (fileLength > 0) FILE_LENGTH_CACHE.put(cleanUrl, fileLength);
+            }
             raf = smbFile.openRandomAccess("r", SmbFile.FILE_SHARE_READ);
             if (dataSpec.position > 0) {
                 raf.seek(dataSpec.position);
