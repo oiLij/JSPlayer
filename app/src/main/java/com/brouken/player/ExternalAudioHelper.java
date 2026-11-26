@@ -73,6 +73,8 @@ public class ExternalAudioHelper {
             } else if ("http".equals(scheme) || "https".equals(scheme)) {
                 DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                         .setUserAgent("JSPlayer")
+                        .setConnectTimeoutMs(20000)
+                        .setReadTimeoutMs(20000)
                         .setAllowCrossProtocolRedirects(true);
                 String userInfo = dataSpec.uri.getUserInfo();
                 if (userInfo != null && userInfo.contains(":")) {
