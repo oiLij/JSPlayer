@@ -80,6 +80,8 @@ public class NetworkBrowser {
     private static final String KEY_SERVERS = "saved_servers";
     private static final ExecutorService executor = Executors.newCachedThreadPool();
     private static final java.util.concurrent.ConcurrentHashMap<String, List<NetItem>> DIR_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, List<NetItem>> DIR_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, FTPClient> FTP_POOL = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private NsdManager nsdManager;
@@ -188,19 +190,36 @@ public class NetworkBrowser {
         }
     }
 
-    public static void browseFtp(String host, int port, String user, String pass, String dirPath, ListCallback callback) {
+    private static List<NetItem> listFtpDirSync(String host, int port, String user, String pass, String dirPath) throws Exception {
         String cacheKey = "ftp|" + host + "|" + port + "|" + (user != null ? user : "") + "|" + dirPath;
         List<NetItem> cached = DIR_CACHE.get(cacheKey);
-        if (cached != null) {
-            mainHandler.post(() -> callback.onResult(new ArrayList<>(cached), null));
-            return;
-        }
-        executor.execute(() -> {
-            List<NetItem> result = new ArrayList<>();
-            FTPClient client = new FTPClient();
+        if (cached != null) return new ArrayList<>(cached);
+    
+        String poolKey = host + "|" + port + "|" + (user != null ? user : "");
+        FTPClient client = FTP_POOL.computeIfAbsent(poolKey, k -> new FTPClient());
+        List<NetItem> result = new ArrayList<>();
+        synchronized (client) {
+            cached = DIR_CACHE.get(cacheKey);
+            if (cached != null) return new ArrayList<>(cached);
             try {
-                client.setConnectTimeout(5000);
-                client.setDefaultTimeout(8000);
+                if (!client.isConnected() || !client.sendNoOp()) {
+                    try { client.disconnect(); } catch (Exception ignored) {}
+                    client.setConnectTimeout(4000);
+                    client.setDefaultTimeout(6000);
+                    client.setControlEncoding("UTF-8");
+                    client.connect(host, port > 0 ? port : 21);
+                    String u = (user == null || user.isEmpty()) ? "anonymous" : user;
+                    String p = (pass == null) ? "" : pass;
+                    if (!client.login(u, p)) {
+                        throw new Exception("FTP Login Failed");
+                    }
+                    client.enterLocalPassiveMode();
+                    client.setFileType(FTP.BINARY_FILE_TYPE);
+                }
+            } catch (Exception reconnectErr) {
+                try { client.disconnect(); } catch (Exception ignored) {}
+                client.setConnectTimeout(4000);
+                client.setDefaultTimeout(6000);
                 client.setControlEncoding("UTF-8");
                 client.connect(host, port > 0 ? port : 21);
                 String u = (user == null || user.isEmpty()) ? "anonymous" : user;
@@ -210,9 +229,11 @@ public class NetworkBrowser {
                 }
                 client.enterLocalPassiveMode();
                 client.setFileType(FTP.BINARY_FILE_TYPE);
-
-                String cleanDir = dirPath.endsWith("/") ? dirPath : dirPath + "/";
-                FTPFile[] files = client.listFiles(cleanDir);
+            }
+    
+            String cleanDir = dirPath.endsWith("/") ? dirPath : dirPath + "/";
+            FTPFile[] files = client.listFiles(cleanDir);
+            if (files != null) {
                 for (FTPFile f : files) {
                     String name = f.getName();
                     if (name == null || ".".equals(name) || "..".equals(name)) continue;
@@ -224,13 +245,32 @@ public class NetworkBrowser {
                         result.add(new NetItem(TYPE_MEDIA, name, null, "ftp", host, port, user, pass, url, false));
                     }
                 }
-                client.logout();
-                client.disconnect();
-                DIR_CACHE.put(cacheKey, new ArrayList<>(result));
-                DIR_CACHE.put(cacheKey, new ArrayList<>(result));
+            }
+            DIR_CACHE.put(cacheKey, new ArrayList<>(result));
+        }
+        return result;
+    }
+    
+    public static void browseFtp(String host, int port, String user, String pass, String dirPath, ListCallback callback) {
+        String cacheKey = "ftp|" + host + "|" + port + "|" + (user != null ? user : "") + "|" + dirPath;
+        List<NetItem> cached = DIR_CACHE.get(cacheKey);
+        if (cached != null) {
+            mainHandler.post(() -> callback.onResult(new ArrayList<>(cached), null));
+            return;
+        }
+        executor.execute(() -> {
+            try {
+                List<NetItem> result = listFtpDirSync(host, port, user, pass, dirPath);
                 mainHandler.post(() -> callback.onResult(result, null));
+                int prefetched = 0;
+                for (NetItem item : result) {
+                    if (item.type == TYPE_FOLDER && prefetched < 6) {
+                        prefetched++;
+                        try { listFtpDirSync(host, port, user, pass, item.path); } catch (Exception ignored) {}
+                    }
+                }
             } catch (Exception e) {
-                mainHandler.post(() -> callback.onResult(result, e.getMessage()));
+                mainHandler.post(() -> callback.onResult(new ArrayList<>(), e.getMessage()));
             }
         });
     }
