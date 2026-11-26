@@ -1456,8 +1456,6 @@ public class PlayerActivity extends Activity {
         trackSelector = new DefaultTrackSelector(this);
         trackSelector.setParameters(trackSelector.buildUponParameters()
                 .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
-                .setExceedAudioConstraintsIfNecessary(true)
-                .setExceedRendererCapabilitiesIfNecessary(true));
         if (mPrefs.tunneling) {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setTunnelingEnabled(true)
@@ -1555,7 +1553,7 @@ public class PlayerActivity extends Activity {
                     }
                 };
             }
-        }.setExtensionRendererMode(passthroughEnabled
+        }.setExtensionRendererMode((passthroughEnabled && externalAudioUri == null)
                 ? DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
                 : DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
 
@@ -2126,6 +2124,18 @@ public class PlayerActivity extends Activity {
         @Override
         public void onPlayerError(PlaybackException error) {
             updateLoading(false);
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                updateLoading(false);
+                if (externalAudioUri != null) {
+                    externalAudioUri = null;
+                    externalAudioForMediaUri = null;
+                    selectExternalAudioPending = false;
+                    android.widget.Toast.makeText(PlayerActivity.this, "External audio format failed — reverting to video audio", android.widget.Toast.LENGTH_LONG).show();
+                    suppressResumeDialogOnce = true;
+                    initializePlayer();
+                    return;
+                }
             if (error instanceof ExoPlaybackException) {
                 final ExoPlaybackException exoPlaybackException = (ExoPlaybackException) error;
                 if (exoPlaybackException.type == ExoPlaybackException.TYPE_SOURCE) {
