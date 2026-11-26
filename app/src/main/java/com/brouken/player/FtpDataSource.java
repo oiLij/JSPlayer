@@ -83,7 +83,8 @@ public class FtpDataSource extends BaseDataSource {
             ftpClient.setRestartOffset(dataSpec.position);
         }
 
-        inputStream = ftpClient.retrieveFileStream(path);
+        java.io.InputStream raw = ftpClient.retrieveFileStream(path);
+        inputStream = raw != null ? new java.io.BufferedInputStream(raw, 262144) : null;
         if (inputStream == null) {
             throw new IOException("FTP failed to open stream: " + path + " (" + ftpClient.getReplyString() + ")");
         }
@@ -137,7 +138,6 @@ public class FtpDataSource extends BaseDataSource {
             if (ftpClient != null) {
                 try {
                     if (ftpClient.isConnected()) {
-                        ftpClient.abort();
                         ftpClient.disconnect();
                     }
                 } catch (Exception ignored) {
