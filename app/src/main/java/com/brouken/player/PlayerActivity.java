@@ -1455,7 +1455,7 @@ public class PlayerActivity extends Activity {
 
         trackSelector = new DefaultTrackSelector(this);
         trackSelector.setParameters(trackSelector.buildUponParameters()
-                .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
+                .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true));
         if (mPrefs.tunneling) {
             trackSelector.setParameters(trackSelector.buildUponParameters()
                     .setTunnelingEnabled(true)
@@ -2121,9 +2121,6 @@ public class PlayerActivity extends Activity {
             }
         }
 
-        @Override
-        public void onPlayerError(PlaybackException error) {
-            updateLoading(false);
             @Override
             public void onPlayerError(PlaybackException error) {
                 updateLoading(false);
