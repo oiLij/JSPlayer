@@ -30,7 +30,6 @@ public class SmbDataSource extends BaseDataSource {
     }
 
     private static final ConcurrentHashMap<String, CIFSContext> CONTEXT_CACHE = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<String, CIFSContext> CONTEXT_CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, Long> FILE_LENGTH_CACHE = new ConcurrentHashMap<>();
     private static final int BUFFER_SIZE = 262144; // 256 KB read-ahead buffer
     private final byte[] internalBuf = new byte[BUFFER_SIZE];
