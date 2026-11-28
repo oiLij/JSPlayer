@@ -80,7 +80,6 @@ public class NetworkBrowser {
     private static final String KEY_SERVERS = "saved_servers";
     private static final ExecutorService executor = Executors.newCachedThreadPool();
     private static final java.util.concurrent.ConcurrentHashMap<String, List<NetItem>> DIR_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final java.util.concurrent.ConcurrentHashMap<String, List<NetItem>> DIR_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.concurrent.ConcurrentHashMap<String, FTPClient> FTP_POOL = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
